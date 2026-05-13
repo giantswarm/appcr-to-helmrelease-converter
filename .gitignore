@@ -4,4 +4,9 @@ apps
 
 __pycache__
 
+.coverage
+.pytest_cache
+
+virtualenv
+
 .idea

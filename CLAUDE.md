@@ -1,15 +1,16 @@
 # appcr-to-helmrelease-converter
 
-Reads one App CR from stdin, writes OCIRepository + HelmRelease to stdout (two YAML documents separated by `---`). See `CONTEXT.md` for domain terminology.
+Reads one App CR from stdin (or a file), writes OCIRepository + HelmRelease to stdout (two YAML documents separated by `---`). See `CONTEXT.md` for domain terminology.
 
 ```bash
-kubectl -n giantswarm get app my-app -o yaml | python main.py
-cat my-app.yaml | python main.py
+kubectl -n giantswarm get app my-app -o yaml | python main.py convert
+cat my-app.yaml | python main.py convert
+python main.py convert my-app.yaml
 ```
 
 ## Current state
 
-Single file (`main.py`), pyyaml dependency only.
+`converter/` package (pure functions) + click CLI in `main.py`. Dependencies: pyyaml, click.
 
 ## Intended evolution
 
@@ -18,7 +19,6 @@ Single file (`main.py`), pyyaml dependency only.
 - Multi-document stdin support (multiple App CRs in one pipe)
 - CLI flags (e.g. OCI registry override, version pinning vs semver wildcard)
 - Input validation
-- Tests
 
 ### Longer term: live migration wrapper
 
@@ -80,4 +80,4 @@ pip install -r requirements-test.txt
 ./virtualenv/bin/pytest --cov --cov-report=term-missing
 ```
 
-Coverage: branch coverage, 100% required, `if __name__ == '__main__':` excluded. Tests in `tests/test_main.py`.
+Coverage: branch coverage, 100% required, `if __name__ == '__main__':` excluded. Tests split across `tests/test_values_from.py`, `tests/test_resources.py`, `tests/test_converter.py`, `tests/test_main.py`.
