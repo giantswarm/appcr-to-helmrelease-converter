@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["main"]
+
+[tool.coverage.report]
+fail_under = 100
+exclude_lines = [
+    "if __name__ == .__main__.:",
+]
