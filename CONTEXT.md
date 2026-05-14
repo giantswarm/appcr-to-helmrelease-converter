@@ -36,6 +36,42 @@ _Avoid_: extra configs, additional configs
 The key inside a ConfigMap or Secret that holds Helm values. The converter emits `configmap-values.yaml` or `secret-values.yaml` — diverging from the App platform's `.data.values` — following the GiantSwarm Flux migration convention.
 _Avoid_: data key, values field
 
+**Catalog CR**:
+A Giant Swarm custom resource (`kind: Catalog`) that describes a chart registry. `spec.repositories[].type` is `oci` or `helm`; `spec.repositories[].URL` is the registry URL. `spec.catalog` on an App CR is the name of a Catalog CR on the MC. Replaces the deprecated `AppCatalog` CR.
+_Avoid_: AppCatalog, catalog resource
+
+**GS catalog**:
+A Catalog CR owned and operated by Giant Swarm, backed by the OCI registry at `gsoci.azurecr.io`. Charts are addressed as `oci://gsoci.azurecr.io/charts/{catalog-name}/{chart-name}`. Known GS catalogs: `giantswarm`, `cluster`, `giantswarm-operations-platform`, `giantswarm-playground`, `control-plane-catalog`, `giantswarm-test`. App CRs referencing a GS catalog convert to an OCIRepository + HelmRelease pair.
+_Avoid_: internal catalog
+
+**Non-GS catalog**:
+A Catalog CR backed by a third-party HTTP Helm repository. The HTTP URL is not derivable from the App CR alone — it must be resolved by looking up the Catalog CR on the MC (`spec.repositories[type=helm].URL`). App CRs referencing a non-GS catalog convert to a HelmRepository + HelmRelease pair instead of an OCIRepository.
+_Avoid_: external catalog, third-party catalog
+
+**HelmRepository**:
+A Flux CD custom resource (`kind: HelmRepository`) that points to an HTTP-based Helm chart registry. Produced instead of an OCIRepository when the App CR references a non-GS catalog.
+_Avoid_: Helm repo source, chart repository resource
+
+**app-operator**:
+The Giant Swarm operator that watches App CRs and translates them into Chart CRs. Resolves Catalog CRs, handles `kubeConfig` routing to remote clusters, and fans out `extraConfigs`/`config`/`userConfig` into a flat Chart CR.
+_Avoid_: app operator (no hyphen)
+
+**chart-operator**:
+The Giant Swarm operator that watches Chart CRs and drives `helm install`/`helm upgrade` against the target cluster. Deprecated — the live migration to Flux replaces it.
+_Avoid_: chart operator (no hyphen)
+
+**In-cluster app**:
+An App CR with `spec.kubeConfig.inCluster: true`. The Helm release runs on the same cluster where the App CR lives (the MC). The converted HelmRelease needs no `spec.kubeConfig` field.
+_Avoid_: local app
+
+**Remote-cluster app**:
+An App CR with `spec.kubeConfig.inCluster: false` and a `spec.kubeConfig.secret.name` pointing to a kubeconfig Secret. The Helm release targets a different cluster (typically a workload cluster). The converted HelmRelease must carry `spec.kubeConfig.secretRef.name` pointing to the same Secret.
+_Avoid_: cross-cluster app, out-of-cluster app
+
+**namespaceConfig**:
+An App CR field (`spec.namespaceConfig`) that supplies annotations and labels to apply to the target namespace. Has no direct equivalent in a HelmRelease — requires a separate `Namespace` resource or is handled out-of-band.
+_Avoid_: namespace metadata, namespace config
+
 **Management Cluster (MC)**:
 The Kubernetes cluster that runs app-operator and chart-operator, where App CRs live.
 _Avoid_: management plane, control cluster
@@ -49,10 +85,13 @@ Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR b
 
 ## Relationships
 
-- One **App CR** produces exactly one **OCIRepository** + one **HelmRelease**
-- A **HelmRelease** references its **OCIRepository** via `spec.chartRef`
+- One **App CR** produces one **HelmRelease** plus either one **OCIRepository** (GS catalog) or one **HelmRepository** (non-GS catalog)
+- A **HelmRelease** references its chart source via `spec.chartRef` (OCIRepository) or `spec.chart.spec.sourceRef` (HelmRepository)
 - **valuesFrom** entries are derived from `spec.extraConfigs`, `spec.config`, and `spec.userConfig` on the **App CR**, merged in ascending **priority** order
 - A **live migration** wraps a **conversion**: suspension → apply converted resources → monitor
+- **app-operator** translates an **App CR** into a **Chart CR** by resolving the **Catalog CR**; **chart-operator** reconciles the **Chart CR** into a Helm release
+- `spec.catalog` on an **App CR** is the name of a **Catalog CR** on the MC; GS catalogs have a known OCI URL pattern, non-GS catalogs require a live lookup of the **Catalog CR** to obtain the HTTP URL
+- A **remote-cluster app** carries a kubeconfig Secret reference on both the **App CR** (`spec.kubeConfig.secret.name`) and the converted **HelmRelease** (`spec.kubeConfig.secretRef.name`)
 
 ## Example dialogue
 

@@ -35,15 +35,26 @@ Package as a container image so the tool runs without a local Python environment
 
 ## Conversion rules
 
-**OCIRepository:**
-- `spec.url`: `oci://gsoci.azurecr.io/charts/giantswarm/{app.spec.name}`
+Two conversion paths depending on `app.spec.catalog`. See `CONTEXT.md` for GS catalog vs non-GS catalog definitions.
+
+**Path A — GS catalog → OCIRepository + HelmRelease**
+
+OCIRepository:
+- `spec.url`: `oci://gsoci.azurecr.io/charts/{catalog}/{app.spec.name}`
 - `spec.ref.semver`: semver wildcard (version pinning via tag is commented out)
 - interval: 10m, provider: generic
 
-**HelmRelease:**
+**Path B — non-GS catalog → HelmRepository + HelmRelease** _(not yet implemented)_
+
+HelmRepository:
+- `spec.url`: looked up from the Catalog CR on the MC (`spec.repositories[type=helm].URL`)
+- The Catalog CR name equals `app.spec.catalog`
+
+**HelmRelease (both paths):**
 - `spec.storageNamespace` + `spec.targetNamespace` ← `app.spec.namespace`
 - `spec.releaseName` ← `app.metadata.name`
-- `spec.chartRef` points to the OCIRepository by name + namespace
+- `spec.chartRef` points to the OCIRepository by name + namespace (Path A)
+- `spec.chart.spec.sourceRef` points to the HelmRepository (Path B, not yet implemented)
 - Upgrade remediation: `remediateLastFailure: true`, strategy: rollback
 - Install remediation: `remediateLastFailure: false`, retries: 10
 
@@ -63,6 +74,29 @@ Package as a container image so the tool runs without a local Python environment
 **Filtered out:**
 - Annotations: `chart-operator.giantswarm.io/force-helm-upgrade`, `app-operator.giantswarm.io/paused`
 - Labels: `app-operator.giantswarm.io/version`
+
+## Feature parity backlog
+
+Fields present in real App CRs that are not yet handled. Each item is a separate session scope.
+
+**1. catalog → OCI URL (GS catalogs)**
+Currently hardcoded to `giantswarm` catalog. Needs to derive the OCI URL from `app.spec.catalog` for all known GS catalogs. Pattern: `oci://gsoci.azurecr.io/charts/{catalog}/{chart}`.
+
+**2. catalog → HelmRepository (non-GS catalogs)**
+Non-GS catalogs require a HelmRepository source instead of OCIRepository. The HTTP URL must be looked up from the Catalog CR on the MC. Requires the converter to accept Catalog CR input or a URL flag.
+
+**3. kubeConfig — remote cluster targeting**
+`spec.kubeConfig.inCluster: false` → emit `spec.kubeConfig.secretRef.name` on the HelmRelease pointing to the same kubeconfig Secret. `inCluster: true` → no change needed.
+_Open question: is the kubeconfig Secret format compatible between app-operator and Flux?_
+
+**4. version — pin vs semver wildcard**
+`spec.version` is present on all App CRs (specific version or empty string). Decide whether to emit `spec.ref.tag` (exact pin) or keep `spec.ref.semver` wildcard when a version is set.
+
+**5. namespaceConfig**
+`spec.namespaceConfig` (annotations + labels on the target namespace) has no HelmRelease equivalent. Decide: emit a separate `Namespace` resource, warn and skip, or error.
+
+**6. install/upgrade/rollback/uninstall blocks**
+All 51 occurrences in the real data are empty `{}`. Safe to ignore — emit nothing.
 
 ## Dev setup
 
