@@ -94,8 +94,7 @@ _Open question: is the kubeconfig Secret format compatible between app-operator 
 **5. namespaceConfig**
 `spec.namespaceConfig` (annotations + labels on the target namespace) has no HelmRelease equivalent. Decide: emit a separate `Namespace` resource, warn and skip, or error.
 
-**6. install/upgrade/rollback/uninstall blocks**
-All 51 occurrences in the real data are empty `{}`. Safe to ignore — emit nothing.
+**6. install/upgrade/rollback/uninstall blocks** ✓ _Decided: omit. All 51 occurrences in real data are empty `{}`. The converter emits nothing for these fields; non-empty blocks are not a supported input._
 
 ## Dev setup
 

@@ -101,6 +101,10 @@ Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR b
 > **Dev:** "Why does the valuesKey differ from what the App platform docs say?"
 > **Domain expert:** "When you migrate, the ConfigMaps and Secrets get renamed following the GiantSwarm Flux convention. The new key names are `configmap-values.yaml` and `secret-values.yaml`, not `.data.values`."
 
+## Scope decisions
+
+- `spec.install`, `spec.upgrade`, `spec.rollback`, `spec.uninstall` on App CRs are always empty `{}` in observed real data. Decision: the converter omits them entirely; non-empty blocks are out of scope.
+
 ## Flagged ambiguities
 
 - "migration" was used loosely to mean both resource translation and the full live rollout — resolved: **conversion** = YAML translation only, **live migration** = full operational process.
