@@ -91,10 +91,12 @@ _Open question: is the kubeconfig Secret format compatible between app-operator 
 
 **4. version — pin vs semver wildcard** ✓ _Implemented: always emit `ref.tag: spec.version`; empty/missing version is a hard error. See ADR 0002._
 
-**5. namespaceConfig**
-`spec.namespaceConfig` (annotations + labels on the target namespace) has no HelmRelease equivalent. Decide: emit a separate `Namespace` resource, warn and skip, or error.
+**5. namespaceConfig** ✓ _Decided: drop with a stderr warning. Target namespace already exists from app-operator; HelmRelease has no equivalent. Warning emitted from `main.py` (I/O layer). See ADR 0004._
 
 **6. install/upgrade/rollback/uninstall blocks** ✓ _Decided: omit. All 51 occurrences in real data are empty `{}`. The converter emits nothing for these fields; non-empty blocks are not a supported input._
+
+**7. Pre-flight checks / structured logging**
+Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should be replaced with a proper diagnostic layer: structured warnings, a `--strict` flag that turns warnings into errors, and/or a pre-flight validation pass that reports all issues before conversion begins.
 
 ## Dev setup
 

@@ -4,6 +4,23 @@ from click.testing import CliRunner
 from main import cli
 
 
+APP_WITH_NAMESPACE_CONFIG_YAML = """\
+apiVersion: application.giantswarm.io/v1alpha1
+kind: App
+metadata:
+  name: my-app
+  namespace: giantswarm
+spec:
+  name: my-app
+  namespace: monitoring
+  version: 1.2.3
+  namespaceConfig:
+    annotations:
+      linkerd.io/inject: enabled
+    labels:
+      some-label: some-value
+"""
+
 MINIMAL_APP_YAML = """\
 apiVersion: application.giantswarm.io/v1alpha1
 kind: App
