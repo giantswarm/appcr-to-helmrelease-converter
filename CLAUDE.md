@@ -17,7 +17,7 @@ python main.py convert my-app.yaml
 ### Near term
 
 - Multi-document stdin support (multiple App CRs in one pipe)
-- CLI flags (e.g. OCI registry override, version pinning vs semver wildcard)
+- CLI flags (e.g. OCI registry override)
 - Input validation
 
 ### Longer term: live migration wrapper
@@ -41,7 +41,7 @@ Two conversion paths depending on `app.spec.catalog`. See `CONTEXT.md` for GS ca
 
 OCIRepository:
 - `spec.url`: `oci://gsoci.azurecr.io/charts/{catalog}/{app.spec.name}`
-- `spec.ref.semver`: semver wildcard (version pinning via tag is commented out)
+- `spec.ref.tag`: `app.spec.version` (exact pin; empty or missing version is a hard error)
 - interval: 10m, provider: generic
 
 **Path B — non-GS catalog → HelmRepository + HelmRelease** _(not yet implemented)_
@@ -89,8 +89,7 @@ Non-GS catalogs require a HelmRepository source instead of OCIRepository. The HT
 `spec.kubeConfig.inCluster: false` → emit `spec.kubeConfig.secretRef.name` on the HelmRelease pointing to the same kubeconfig Secret. `inCluster: true` → no change needed.
 _Open question: is the kubeconfig Secret format compatible between app-operator and Flux?_
 
-**4. version — pin vs semver wildcard**
-`spec.version` is present on all App CRs (specific version or empty string). Decide whether to emit `spec.ref.tag` (exact pin) or keep `spec.ref.semver` wildcard when a version is set.
+**4. version — pin vs semver wildcard** ✓ _Implemented: always emit `ref.tag: spec.version`; empty/missing version is a hard error. See ADR 0002._
 
 **5. namespaceConfig**
 `spec.namespaceConfig` (annotations + labels on the target namespace) has no HelmRelease equivalent. Decide: emit a separate `Namespace` resource, warn and skip, or error.

@@ -142,5 +142,20 @@ class TestBuildOciRepository:
     def test_provider(self):
         assert build_oci_repository(_app())["spec"]["provider"] == "generic"
 
-    def test_semver_wildcard(self):
-        assert build_oci_repository(_app())["spec"]["ref"]["semver"] == "x.x.x"
+    def test_ref_tag_from_spec_version(self):
+        assert build_oci_repository(_app())["spec"]["ref"]["tag"] == "1.0.0"
+
+    def test_ref_tag_reflects_spec_version_value(self):
+        assert build_oci_repository(_app(spec_extra={"version": "2.3.4"}))["spec"]["ref"]["tag"] == "2.3.4"
+
+    def test_empty_version_raises(self):
+        import pytest
+        with pytest.raises(ValueError, match="spec.version"):
+            build_oci_repository(_app(spec_extra={"version": ""}))
+
+    def test_missing_version_raises(self):
+        import pytest
+        app = _app()
+        del app["spec"]["version"]
+        with pytest.raises(ValueError, match="spec.version"):
+            build_oci_repository(app)

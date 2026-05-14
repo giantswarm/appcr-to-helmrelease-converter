@@ -4,6 +4,9 @@ from converter.values_from import calculate_values_from
 
 
 def build_oci_repository(app: dict) -> OrderedDict:
+    version = app["spec"].get("version")
+    if not version:
+        raise ValueError("spec.version is required but empty")
     return OrderedDict([
         ("apiVersion", "source.toolkit.fluxcd.io/v1beta2"),
         ("kind", "OCIRepository"),
@@ -15,7 +18,7 @@ def build_oci_repository(app: dict) -> OrderedDict:
             ("interval", "10m"),
             ("provider", "generic"),
             ("ref", OrderedDict([
-                ("semver", "x.x.x"),
+                ("tag", version),
             ])),
             ("url", f"oci://gsoci.azurecr.io/charts/giantswarm/{app['spec']['name']}"),
         ]))
