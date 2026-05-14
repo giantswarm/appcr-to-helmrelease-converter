@@ -84,6 +84,14 @@ def build_helm_release(app: dict) -> OrderedDict:
     if labels:
         hr["metadata"]["labels"] = labels
 
+    kube_config = app["spec"].get("kubeConfig", {})
+    if kube_config and not kube_config.get("inCluster"):
+        hr["spec"]["kubeConfig"] = OrderedDict([
+            ("secretRef", OrderedDict([
+                ("name", kube_config["secret"]["name"]),
+            ]))
+        ])
+
     values_from = calculate_values_from(app)
     if values_from:
         hr["spec"]["valuesFrom"] = values_from

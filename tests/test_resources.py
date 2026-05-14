@@ -104,6 +104,40 @@ class TestBuildHelmRelease:
         result = build_helm_release(_app(labels={"app-operator.giantswarm.io/version": "1.0.0"}))
         assert "labels" not in result["metadata"]
 
+    def test_no_kube_config_when_spec_kube_config_absent(self):
+        assert "kubeConfig" not in build_helm_release(_app())["spec"]
+
+    def test_no_kube_config_when_in_cluster(self):
+        assert "kubeConfig" not in build_helm_release(
+            _app(spec_extra={"kubeConfig": {"inCluster": True}})
+        )["spec"]
+
+    def test_kube_config_secret_ref_has_no_key_field(self):
+        result = build_helm_release(_app(spec_extra={
+            "kubeConfig": {
+                "inCluster": False,
+                "secret": {"name": "example-kubeconfig", "namespace": "org-giantswarm"},
+            }
+        }))
+        assert "key" not in result["spec"]["kubeConfig"]["secretRef"]
+
+    def test_kube_config_secret_ref_name_when_in_cluster_absent(self):
+        result = build_helm_release(_app(spec_extra={
+            "kubeConfig": {
+                "secret": {"name": "example-kubeconfig", "namespace": "org-giantswarm"},
+            }
+        }))
+        assert result["spec"]["kubeConfig"]["secretRef"]["name"] == "example-kubeconfig"
+
+    def test_kube_config_secret_ref_name_when_remote_cluster(self):
+        result = build_helm_release(_app(spec_extra={
+            "kubeConfig": {
+                "inCluster": False,
+                "secret": {"name": "example-kubeconfig", "namespace": "org-giantswarm"},
+            }
+        }))
+        assert result["spec"]["kubeConfig"]["secretRef"]["name"] == "example-kubeconfig"
+
     def test_no_values_from_when_no_config(self):
         assert "valuesFrom" not in build_helm_release(_app())["spec"]
 
