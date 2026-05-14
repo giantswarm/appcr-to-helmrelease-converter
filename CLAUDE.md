@@ -70,6 +70,7 @@ HelmRepository:
 
 - `valuesKey`: `configmap-values.yaml` for ConfigMaps, `secret-values.yaml` for Secrets
 - `namespace` is dropped from all valuesFrom entries (Flux expects co-located objects)
+- References with an empty or absent `name` under `spec.config` or `spec.userConfig` are skipped with a preflight warning — they are Go zero-value structs that app-operator also ignores
 
 **Filtered out:**
 - Annotations: `chart-operator.giantswarm.io/force-helm-upgrade`, `app-operator.giantswarm.io/paused`

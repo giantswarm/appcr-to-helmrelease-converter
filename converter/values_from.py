@@ -5,7 +5,7 @@ ReferenceWithPriority = namedtuple("ReferenceWithPriority", ["reference", "prior
 
 
 def to_reference_with_priority(reference: dict, kind: str, default_priority: int) -> Optional[ReferenceWithPriority]:
-    if reference:
+    if reference and reference.get("name"):
         return ReferenceWithPriority(
             priority=reference.get("priority", default_priority),
             reference=OrderedDict([

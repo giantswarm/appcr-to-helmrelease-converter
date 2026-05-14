@@ -26,9 +26,14 @@ class TestToReferenceWithPriority:
         result = to_reference_with_priority({"name": "my-cm"}, "ConfigMap", 50)
         assert result.reference["name"] == "my-cm"
 
-    def test_missing_name_defaults_to_empty_string(self):
-        result = to_reference_with_priority({"priority": 10}, "ConfigMap", 50)
-        assert result.reference["name"] == ""
+    def test_empty_name_returns_none(self):
+        assert to_reference_with_priority({"name": ""}, "ConfigMap", 50) is None
+
+    def test_missing_name_returns_none(self):
+        assert to_reference_with_priority({"priority": 10}, "ConfigMap", 50) is None
+
+    def test_empty_name_with_namespace_returns_none(self):
+        assert to_reference_with_priority({"name": "", "namespace": "org-x"}, "Secret", 50) is None
 
     def test_configmap_values_key(self):
         result = to_reference_with_priority({"name": "cm"}, "ConfigMap", 50)
