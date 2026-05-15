@@ -86,9 +86,7 @@ Currently hardcoded to `giantswarm` catalog. Needs to derive the OCI URL from `a
 **2. catalog → HelmRepository (non-GS catalogs)**
 Non-GS catalogs require a HelmRepository source instead of OCIRepository. The HTTP URL must be looked up from the Catalog CR on the MC. Requires the converter to accept Catalog CR input or a URL flag.
 
-**3. kubeConfig — remote cluster targeting**
-`spec.kubeConfig.inCluster: false` → emit `spec.kubeConfig.secretRef.name` on the HelmRelease pointing to the same kubeconfig Secret. `inCluster: true` → no change needed.
-_Open question: is the kubeconfig Secret format compatible between app-operator and Flux?_
+**3. kubeConfig — remote cluster targeting** ✓ _Implemented: emit `spec.kubeConfig.secretRef.name` on HelmRelease when `inCluster: false`. See commit 199bf5b._
 
 **4. version — pin vs semver wildcard** ✓ _Implemented: always emit `ref.tag: spec.version`; empty/missing version is a hard error. See ADR 0002._
 
