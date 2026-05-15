@@ -41,7 +41,28 @@ A Giant Swarm custom resource (`kind: Catalog`) that describes a chart registry.
 _Avoid_: AppCatalog, catalog resource
 
 **GS catalog**:
-A Catalog CR owned and operated by Giant Swarm, backed by the OCI registry at `gsoci.azurecr.io`. Charts are addressed as `oci://gsoci.azurecr.io/charts/{catalog-name}/{chart-name}`. Known GS catalogs: `giantswarm`, `cluster`, `giantswarm-operations-platform`, `giantswarm-playground`, `control-plane-catalog`, `giantswarm-test`. App CRs referencing a GS catalog convert to an OCIRepository + HelmRelease pair.
+A Catalog CR owned and operated by Giant Swarm, backed by the OCI registry at `gsoci.azurecr.io`. All charts are addressed as `oci://gsoci.azurecr.io/charts/giantswarm/{chart-name}` — the `giantswarm` path segment is a fixed constant, not the catalog name. GS catalogs are identified by the pair `(spec.catalog, resolved-namespace)` — a name alone is insufficient because a non-GS catalog could share the same name in a different namespace. GS catalogs are either `public` (Catalog CR in the `default` namespace) or `internal` (Catalog CR in the `giantswarm` namespace). When `spec.catalogNamespace` is absent on an App CR, the resolved namespace is `default`.
+
+Known GS catalogs:
+
+| name | type | namespace |
+|---|---|---|
+| cluster | public | default |
+| cluster-test | internal | giantswarm |
+| control-plane-catalog | internal | giantswarm |
+| control-plane-test-catalog | internal | giantswarm |
+| default | internal | giantswarm |
+| default-test | internal | giantswarm |
+| giantswarm | public | default |
+| giantswarm-operations-platform | internal | giantswarm |
+| giantswarm-operations-platform-test | internal | giantswarm |
+| giantswarm-playground | internal | giantswarm |
+| giantswarm-playground-test | internal | giantswarm |
+| giantswarm-test | internal | giantswarm |
+| releases | internal | giantswarm |
+| releases-test | internal | giantswarm |
+
+App CRs referencing a GS catalog convert to an OCIRepository + HelmRelease pair.
 _Avoid_: internal catalog
 
 **Non-GS catalog**:
@@ -105,6 +126,7 @@ Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR b
 
 - `spec.install`, `spec.upgrade`, `spec.rollback`, `spec.uninstall` on App CRs are always empty `{}` in observed real data. Decision: the converter omits them entirely; non-empty blocks are out of scope.
 - `spec.config.configMap`, `spec.config.secret`, `spec.userConfig.configMap`, and `spec.userConfig.secret` sub-fields with an empty `name` are Go zero-value structs serialised to YAML — the App CR schema uses pointer-free structs so the field appears on the wire even when never populated. The converter skips these entries with a preflight warning, matching app-operator's behaviour. See ADR 0006.
+- The `giantswarm` segment in `oci://gsoci.azurecr.io/charts/giantswarm/{chart}` is a fixed constant for all GS catalogs — it does not vary with `spec.catalog`.
 
 ## Flagged ambiguities
 
