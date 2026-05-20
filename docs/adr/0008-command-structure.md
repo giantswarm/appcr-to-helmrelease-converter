@@ -1,10 +1,10 @@
-# 8. Three-command CLI structure: convert, convert-from-cluster, migrate
+# 8. Four-command CLI structure: fetch, convert, fetch-and-convert, migrate
 
 Date: 2026-05-20
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -25,16 +25,18 @@ Option 2 was chosen.
 
 ## Decision
 
-Three commands, each a strict superset of the previous:
+Four commands at increasing capability levels:
 
 | Command | Inputs | Scope |
 |---|---|---|
+| `fetch` | `--name`, `--namespace`, optional `--context` | Fetch App CR + Catalog CR from MC; emit multi-doc YAML (Catalog CR first, App CR second). Pipeable into `convert`. |
 | `convert` | Multi-doc YAML from stdin or file (App CR + Catalog CR separated by `---`) | Offline pure transform; no cluster access |
-| `convert-from-cluster` | `--name`, `--namespace`, optional `--context` | Fetch both CRs from MC, then convert |
+| `fetch-and-convert` | `--name`, `--namespace`, optional `--context` | Fetch both CRs from MC, then convert. Keeps both CRs in memory for use by `migrate`. |
 | `migrate` | `--name`, `--namespace`, optional `--context` | Fetch + convert + apply + observe + optional revert _(future)_ |
 
-`convert` and `convert-from-cluster` share the same `converter/` pure functions.
-`convert-from-cluster` and `migrate` share the same `fetcher/` I/O package.
+`fetch` and `fetch-and-convert` share the `fetcher/` I/O package.
+`convert` and `fetch-and-convert` share the same `converter/` pure functions.
+`fetch-and-convert` and `migrate` share the same `fetcher/` I/O package.
 
 `migrate` is reserved as a named command but not yet implemented.
 
@@ -43,7 +45,7 @@ Three commands, each a strict superset of the previous:
 - Each command has a clear, minimal scope; no flags from one level leak into another.
 - Offline users (e.g. in scripts, CI) can use `convert` without cluster credentials,
   as long as they supply both CRs in a multi-doc YAML.
-- The `fetcher/` package is a shared dependency of `convert-from-cluster` and the
+- The `fetcher/` package is a shared dependency of `fetch-and-convert` and the
   future `migrate` command, so its interface is designed with both in mind.
 - Removing `migrate` from scope now avoids premature design of the apply/observe/
   revert logic while still reserving the command name.

@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-`convert-from-cluster` (and the future `migrate` command) must fetch an App CR and
+`fetch-and-convert` (and the future `migrate` command) must fetch an App CR and
 its Catalog CR from the MC. Two implementation options were considered:
 
 1. **Shell out to `kubectl`** — `subprocess` call to `kubectl get ... -o yaml`.
@@ -56,7 +56,7 @@ fetches both CRs unconditionally. Path selection is the converter's responsibili
 - `fetcher.fetch()` is straightforward to mock in tests: return a tuple of two
   dicts, no subprocess or network required.
 - `migrate` can reuse `fetcher/` directly when it is implemented.
-- Users running `convert-from-cluster` need a valid kubeconfig with read access to
+- Users running `fetch-and-convert` need a valid kubeconfig with read access to
   App CRs and Catalog CRs on the MC. If the Catalog CR lives in a namespace the
   user cannot read, the fetch fails with a clear permission error from the
   kubernetes client.

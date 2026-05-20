@@ -17,7 +17,7 @@ A Flux CD custom resource (`kind: OCIRepository`) that points to a Helm chart in
 _Avoid_: OCI source, chart source
 
 **Conversion**:
-The act of transforming an App CR and its Catalog CR into a Flux resource pair. Always receives two inputs: an App CR dict and a Catalog CR dict. Produces an OCIRepository + HelmRelease pair when `catalog_dict["spec"]["repositories"][].type` is `oci` (Path A), or a HelmRepository + HelmRelease pair when the type is `helm` (Path B).
+The act of transforming an App CR dict and a Catalog CR dict into a Flux resource pair. Always receives two inputs: `(app_dict, catalog_dict)`. Produces an OCIRepository + HelmRelease pair (Path A) when the Catalog CR has an `oci` repository type, or a HelmRepository + HelmRelease pair (Path B) when only `helm` is present. Path selection reads `spec.repositories` first, falling back to the deprecated `spec.storage`.
 _Avoid_: migration (reserved for the broader live migration process), transformation
 
 **valuesFrom**:
@@ -37,7 +37,13 @@ The key inside a ConfigMap or Secret that holds Helm values. The converter emits
 _Avoid_: data key, values field
 
 **Catalog CR**:
-A Giant Swarm custom resource (`kind: Catalog`) that describes a chart registry. `spec.repositories[].type` is `oci` or `helm`; `spec.repositories[].URL` is the registry URL. `spec.catalog` on an App CR is the name of a Catalog CR on the MC. Replaces the deprecated `AppCatalog` CR.
+A Giant Swarm custom resource (`kind: Catalog`) that describes a chart registry. `spec.catalog` on an App CR is the name of a Catalog CR on the MC. Replaces the deprecated `AppCatalog` CR.
+
+Repository type and URL are read using this lookup order:
+1. `spec.repositories[]` (current field) — array of `{type, URL}` entries. `oci` is preferred over `helm` if both are present.
+2. `spec.storage` (deprecated) — single `{type, URL}` object; same shape as one `spec.repositories` entry. Used as fallback when `spec.repositories` is absent or null.
+
+Hard error if neither field yields a recognised type (`oci` or `helm`).
 _Avoid_: AppCatalog, catalog resource
 
 **HelmRepository**:
@@ -47,6 +53,10 @@ _Avoid_: Helm repo source, chart repository resource
 **Fetch**:
 The act of pulling an App CR and its Catalog CR from the MC by name and namespace, using the Kubernetes API. The Catalog CR name and namespace are derived from `spec.catalog` and `spec.catalogNamespace` on the App CR (`default` when `spec.catalogNamespace` is absent). Always produces two dicts: the App CR and the Catalog CR. Implemented in the `fetcher/` package.
 _Avoid_: lookup, resolve, cluster fetch
+
+**`fetch` command**:
+The CLI command that runs a Fetch and emits the result as a two-document YAML stream (Catalog CR first, App CR second). Takes `--name`, `--namespace`, and optional `--context`. Output is raw and unmodified — server-side fields are preserved. Designed to be pipeable into `convert`.
+_Avoid_: fetch command (without backticks in prose)
 
 **app-operator**:
 The Giant Swarm operator that watches App CRs and translates them into Chart CRs. Resolves Catalog CRs, handles `kubeConfig` routing to remote clusters, and fans out `extraConfigs`/`config`/`userConfig` into a flat Chart CR.

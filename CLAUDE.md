@@ -7,9 +7,13 @@ Converts App CRs into Flux CD resources (OCIRepository or HelmRepository + HelmR
 cat my-app-and-catalog.yaml | python main.py convert
 python main.py convert my-app-and-catalog.yaml
 
-# Cluster-aware: fetches both CRs from the MC by name
-python main.py convert-from-cluster --name my-app --namespace giantswarm
-python main.py convert-from-cluster --name my-app --namespace giantswarm --context my-context
+# Fetch CRs from MC as multi-doc YAML (pipeable into convert)
+python main.py fetch --name my-app --namespace giantswarm
+python main.py fetch --name my-app --namespace giantswarm --context my-context
+
+# Fetch and convert in one step
+python main.py fetch-and-convert --name my-app --namespace giantswarm
+python main.py fetch-and-convert --name my-app --namespace giantswarm --context my-context
 
 # Full live migration (planned)
 python main.py migrate --name my-app --namespace giantswarm
@@ -24,7 +28,7 @@ python main.py migrate --name my-app --namespace giantswarm
 ### Near term
 
 - Catalog CR as required second input; conversion path from `spec.repositories[].type` (see ADR 0007)
-- `convert-from-cluster` command: `--name`, `--namespace`, optional `--context` (see ADR 0008, ADR 0009)
+- `fetch-and-convert` command: `--name`, `--namespace`, optional `--context` (see ADR 0008, ADR 0009)
 - Input validation
 
 ### Longer term: live migration wrapper
@@ -92,11 +96,17 @@ HelmRelease (Path B):
 
 Fields present in real App CRs that are not yet handled. Each item is a separate session scope.
 
-**1. catalog → OCI URL** _(planned — see ADR 0007)_
-Converter will read `spec.repositories[type=oci].URL` from the Catalog CR instead of the hardcoded URL. Requires the Catalog CR as a mandatory second input.
+**1a. converter — Catalog CR integration (Path A + Path B)** _(designed — see ADR 0007)_
+Change converter interface to `convert(app_dict, catalog_dict)`. Read URL and path from Catalog CR: check `spec.repositories` first (prefer `oci` over `helm`), fall back to deprecated `spec.storage`. Hard error if no recognised type. Path A produces OCIRepository + HelmRelease; Path B produces HelmRepository + HelmRelease.
 
-**2. catalog → HelmRepository** _(planned — see ADR 0007, ADR 0008)_
-When `spec.repositories[].type == "helm"`, produce a HelmRepository + HelmRelease instead of OCIRepository. URL sourced from first `spec.repositories[type=helm].URL` entry; preflight warning if multiple. Path selection is purely from the Catalog CR type — no GS vs non-GS lookup needed.
+**1b. `convert` command — multi-doc YAML input** _(designed — see ADR 0007)_
+Change `convert` to parse multi-doc YAML via `yaml.safe_load_all()`. Identify App CR and Catalog CR by both `kind` and `apiVersion: application.giantswarm.io/v1alpha1`. Hard error on missing or duplicate docs. Document order is not significant.
+
+**1c. `fetch` command** _(designed — see ADR 0008, ADR 0010)_
+New CLI command: `--name`, `--namespace`, optional `--context`. Calls `fetcher.fetch()`, emits raw multi-doc YAML (Catalog CR first, App CR second). Pipeable into `convert`.
+
+**1d. `fetch-and-convert` command** _(designed — see ADR 0008)_
+New CLI command: `--name`, `--namespace`, optional `--context`. Calls `fetcher.fetch()` then passes both dicts directly to the converter. End-to-end cluster → Flux YAML in one step.
 
 **3. kubeConfig — remote cluster targeting** ✓ _Implemented: emit `spec.kubeConfig.secretRef.name` on HelmRelease when `inCluster: false`. See commit 199bf5b._
 
@@ -109,7 +119,7 @@ When `spec.repositories[].type == "helm"`, produce a HelmRepository + HelmReleas
 **7. Pre-flight checks / structured logging**
 Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should be replaced with a proper diagnostic layer: structured warnings, a `--strict` flag that turns warnings into errors, and/or a pre-flight validation pass that reports all issues before conversion begins.
 
-**8. fetcher/ package — cluster fetch for convert-from-cluster** ✓ _Implemented: `fetcher/` I/O package with `fetch(name, namespace, context=None) -> (app_dict, catalog_dict)`. Wraps ApiException in FetchError. See ADR 0009._
+**8. fetcher/ package — cluster fetch for fetch-and-convert** ✓ _Implemented: `fetcher/` I/O package with `fetch(name, namespace, context=None) -> (app_dict, catalog_dict)`. Wraps ApiException in FetchError. See ADR 0009._
 
 ## Dev setup
 

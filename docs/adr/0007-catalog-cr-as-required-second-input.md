@@ -4,7 +4,7 @@ Date: 2026-05-20
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -30,26 +30,39 @@ distinction becomes human context only — the converter needs no knowledge of i
 ## Decision
 
 The converter always receives two dicts: `(app_dict, catalog_dict)`. The conversion
-path is determined purely by the Catalog CR:
+path is determined purely by the Catalog CR using the following lookup order:
 
-- `catalog_dict["spec"]["repositories"]` contains an entry with `type: oci` →
-  **Path A**: produce an OCIRepository + HelmRelease. The OCIRepository `spec.url`
-  is `{repositories[type=oci].URL.rstrip("/")}/{app.spec.name}`. `oci` type is
-  preferred if multiple types are present.
+**Step 1 — read from `spec.repositories`** (current field, array of `{type, URL}`).
+If absent or null, fall through to Step 2.
+
+**Step 2 — fall back to `spec.storage`** (deprecated, single `{type, URL}` object).
+
+**Path selection from whichever step yields a result:**
+
+- Any entry with `type: oci` present → **Path A**: produce an OCIRepository +
+  HelmRelease. `oci` is preferred over `helm` if both are present. The OCIRepository
+  `spec.url` is `{repositories[type=oci].URL.rstrip("/")}/{app.spec.name}`.
 - No `oci` entry; `type: helm` present → **Path B**: produce a HelmRepository +
   HelmRelease. The HelmRepository `spec.url` is the first `type: helm` entry's URL.
   A preflight warning is emitted when multiple `helm` entries are present.
+- Neither type recognised → hard error.
+
+`spec.storage` is treated as a single-element list for path selection purposes —
+the same logic applies regardless of which field supplied the entry.
 
 The static GS catalog lookup table is removed from code entirely. It is retained in
 `CONTEXT.md` as human reference only.
 
-Both input sources supply the Catalog CR as a second YAML document:
+Both input sources supply both CRs:
 
 - **Offline `convert`**: stdin (or a file argument) carries a multi-doc YAML with
-  App CR and Catalog CR separated by `---`. Parsed with `yaml.safe_load_all()`;
-  documents identified by `kind`.
-- **`convert-from-cluster`**: the `fetcher/` package fetches both CRs from the MC
-  (see ADR 0009).
+  App CR and Catalog CR separated by `---`. Parsed with `yaml.safe_load_all()`.
+  Documents are identified by both `kind` and `apiVersion`
+  (`application.giantswarm.io/v1alpha1`). Exactly one App doc and exactly one
+  Catalog doc are required — missing or duplicate docs are a hard error.
+  Document order is not significant.
+- **`fetch-and-convert`**: the `fetcher/` package fetches both CRs from the MC
+  and passes them as dicts directly to the converter (see ADR 0009).
 
 ### HelmRelease for Path B
 
