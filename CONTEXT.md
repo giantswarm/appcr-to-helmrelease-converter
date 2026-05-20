@@ -51,11 +51,11 @@ A Flux CD custom resource (`kind: HelmRepository`) that points to an HTTP-based 
 _Avoid_: Helm repo source, chart repository resource
 
 **Fetch**:
-The act of pulling an App CR and its Catalog CR from the MC by name and namespace, using the Kubernetes API. The Catalog CR name and namespace are derived from `spec.catalog` and `spec.catalogNamespace` on the App CR (`default` when `spec.catalogNamespace` is absent). Always produces two dicts: the App CR and the Catalog CR. Implemented in the `fetcher/` package.
+The act of pulling an App CR and its Catalog CR from the MC by name and namespace, using the Kubernetes API. The Catalog CR name is taken from `spec.catalog`. The namespace is resolved as follows: if `spec.catalogNamespace` is set, only that namespace is checked; otherwise `default` is tried first, then `giantswarm`, using the first namespace where the Catalog CR is found (mirroring app-operator behaviour). A non-404 error during the fallback fails immediately. Hard error if the catalog is not found in any checked namespace. Always produces two dicts: the App CR and the Catalog CR. Implemented in the `fetcher/` package.
 _Avoid_: lookup, resolve, cluster fetch
 
 **`fetch` command**:
-The CLI command that runs a Fetch and emits the result as a two-document YAML stream (Catalog CR first, App CR second). Takes `--name`, `--namespace`, and optional `--context`. Output is raw and unmodified — server-side fields are preserved. Designed to be pipeable into `convert`.
+The CLI command that runs a Fetch and emits the result as a two-document YAML stream (Catalog CR first, App CR second). Takes `--name`, `--namespace`, and optional `--context`. Server-side metadata fields (`uid`, `resourceVersion`, `generation`, `creationTimestamp`, `selfLink`, `managedFields`) and the `kubectl.kubernetes.io/last-applied-configuration` annotation are stripped before output; all other fields are preserved. Designed to be pipeable into `convert`.
 _Avoid_: fetch command (without backticks in prose)
 
 **app-operator**:

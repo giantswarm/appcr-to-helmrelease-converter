@@ -11,6 +11,34 @@ from fetcher import FetchError
 from preflight import PreflightError, run_preflight
 
 
+_SERVER_METADATA_FIELDS = frozenset({
+    "creationTimestamp",
+    "generation",
+    "managedFields",
+    "resourceVersion",
+    "selfLink",
+    "uid",
+})
+
+_SERVER_ANNOTATIONS = frozenset({
+    "kubectl.kubernetes.io/last-applied-configuration",
+})
+
+
+def _strip_server_fields(doc: dict) -> dict:
+    if "metadata" not in doc:
+        return doc
+    stripped = {k: v for k, v in doc["metadata"].items() if k not in _SERVER_METADATA_FIELDS}
+    if "annotations" in stripped:
+        annotations = {k: v for k, v in stripped["annotations"].items()
+                       if k not in _SERVER_ANNOTATIONS}
+        if annotations:
+            stripped["annotations"] = annotations
+        else:
+            del stripped["annotations"]
+    return {**doc, "metadata": stripped}
+
+
 def _dump(docs):
     def ordered_dict_representer(dumper, data):
         return dumper.represent_mapping(BaseResolver.DEFAULT_MAPPING_TAG, data.items())
@@ -52,7 +80,7 @@ def fetch_cmd(name, namespace, context):
     except FetchError as e:
         click.echo(f"error: {e}", err=True)
         raise SystemExit(1)
-    _dump([catalog, app])
+    _dump([_strip_server_fields(catalog), _strip_server_fields(app)])
 
 
 cli.add_command(fetch_cmd, name="fetch")

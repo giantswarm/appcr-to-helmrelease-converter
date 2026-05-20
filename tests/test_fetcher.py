@@ -19,6 +19,11 @@ APP_DICT = {
     },
 }
 
+APP_DICT_NO_CATALOG_NS = {
+    **APP_DICT,
+    "spec": {k: v for k, v in APP_DICT["spec"].items() if k != "catalogNamespace"},
+}
+
 CATALOG_DICT = {
     "apiVersion": "application.giantswarm.io/v1alpha1",
     "kind": "Catalog",
@@ -69,15 +74,60 @@ class TestFetch:
             "name": "giantswarm",
         }
 
-    def test_catalog_namespace_defaults_to_default_when_absent(self):
-        app_without_ns = {**APP_DICT, "spec": {**APP_DICT["spec"]}}
-        del app_without_ns["spec"]["catalogNamespace"]
-        mock_api = _mock_api(app_dict=app_without_ns)
+    def test_catalog_found_in_default_when_catalog_namespace_absent(self):
+        mock_api = _mock_api(app_dict=APP_DICT_NO_CATALOG_NS)
         with patch("kubernetes.config.load_kube_config"), \
              patch("kubernetes.client.CustomObjectsApi", return_value=mock_api):
-            fetch("my-app", "giantswarm")
+            _, catalog = fetch("my-app", "giantswarm")
         second_call = mock_api.get_namespaced_custom_object.call_args_list[1]
         assert second_call.kwargs["namespace"] == "default"
+        assert catalog == CATALOG_DICT
+
+    def test_catalog_found_in_giantswarm_when_not_in_default(self):
+        mock_api = MagicMock()
+        mock_api.get_namespaced_custom_object.side_effect = [
+            APP_DICT_NO_CATALOG_NS,
+            ApiException(status=404),
+            CATALOG_DICT,
+        ]
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=mock_api):
+            _, catalog = fetch("my-app", "giantswarm")
+        third_call = mock_api.get_namespaced_custom_object.call_args_list[2]
+        assert third_call.kwargs["namespace"] == "giantswarm"
+        assert catalog == CATALOG_DICT
+
+    def test_raises_fetch_error_when_catalog_not_in_default_or_giantswarm(self):
+        mock_api = MagicMock()
+        mock_api.get_namespaced_custom_object.side_effect = [
+            APP_DICT_NO_CATALOG_NS,
+            ApiException(status=404),
+            ApiException(status=404),
+        ]
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=mock_api):
+            with pytest.raises(FetchError, match="not found in default or giantswarm"):
+                fetch("my-app", "giantswarm")
+
+    def test_raises_fetch_error_immediately_on_non_404_during_fallback(self):
+        mock_api = MagicMock()
+        mock_api.get_namespaced_custom_object.side_effect = [
+            APP_DICT_NO_CATALOG_NS,
+            ApiException(status=403),
+        ]
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=mock_api):
+            with pytest.raises(FetchError):
+                fetch("my-app", "giantswarm")
+        assert mock_api.get_namespaced_custom_object.call_count == 2
+
+    def test_raises_fetch_error_when_catalog_not_found_in_explicit_namespace(self):
+        mock_api = MagicMock()
+        mock_api.get_namespaced_custom_object.side_effect = [APP_DICT, ApiException(status=404)]
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=mock_api):
+            with pytest.raises(FetchError, match="not found in giantswarm"):
+                fetch("my-app", "giantswarm")
 
     def test_raises_fetch_error_when_app_cr_not_found(self):
         mock_api = MagicMock()
@@ -92,7 +142,7 @@ class TestFetch:
         mock_api.get_namespaced_custom_object.side_effect = [APP_DICT, ApiException(status=404)]
         with patch("kubernetes.config.load_kube_config"), \
              patch("kubernetes.client.CustomObjectsApi", return_value=mock_api):
-            with pytest.raises(FetchError, match="Catalog giantswarm/giantswarm"):
+            with pytest.raises(FetchError, match="Catalog giantswarm"):
                 fetch("my-app", "giantswarm")
 
     def test_fetches_app_cr_with_correct_coordinates(self):

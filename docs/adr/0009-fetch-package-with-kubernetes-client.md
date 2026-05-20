@@ -39,8 +39,12 @@ Returns `(app_dict, catalog_dict)`. Internally:
 1. Loads kubeconfig from the default location (`~/.kube/config`) or the context
    specified by `context`.
 2. Fetches the App CR by `name` and `namespace`.
-3. Reads `spec.catalog` and `spec.catalogNamespace` from the App CR to derive the
-   Catalog CR name and namespace (`default` when `spec.catalogNamespace` is absent).
+3. Reads `spec.catalog` and `spec.catalogNamespace` from the App CR. If
+   `spec.catalogNamespace` is set, fetches the Catalog CR from that namespace only.
+   Otherwise, tries `default` first, then `giantswarm`, using the first namespace
+   where the Catalog CR is found (mirroring app-operator behaviour). A non-404 API
+   error during the fallback fails immediately without trying the next namespace.
+   Hard error if the catalog is not found in any checked namespace.
 4. Fetches the Catalog CR.
 5. Returns both as plain dicts (same shape as `yaml.safe_load` output).
 

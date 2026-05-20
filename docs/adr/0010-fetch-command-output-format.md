@@ -1,4 +1,4 @@
-# 10. fetch command emits raw multi-doc YAML with Catalog CR first
+# 10. fetch command emits cleaned multi-doc YAML with Catalog CR first
 
 Date: 2026-05-20
 
@@ -32,17 +32,25 @@ them as YAML. Two output decisions were required:
 The `convert` command identifies documents by `kind` + `apiVersion`, not position,
 so the ordering has no effect on `fetch | convert` pipelines.
 
-**Filtering:** Raw, unmodified output. The `fetch` command is an inspection and
-scripting tool — stripping fields would hide information and could silently drop
-data that downstream tools depend on. The `convert` command reads only the fields
-it needs and ignores the rest, so server-side metadata in the stream is harmless.
+**Filtering:** Strip well-known server-side fields before emitting. The following
+`metadata` fields are removed: `uid`, `resourceVersion`, `generation`,
+`creationTimestamp`, `selfLink`, `managedFields`. The annotation
+`kubectl.kubernetes.io/last-applied-configuration` is also removed; if that was the
+only annotation, the `annotations` key is dropped entirely. All other fields
+(labels, other annotations, spec, status) are preserved unchanged.
+
+Stripping happens in the CLI output layer (`main.py`), not in the `fetcher/`
+package. The `fetcher/` package always returns the full server response so that
+future commands (e.g. `migrate`) that need `resourceVersion` for optimistic
+concurrency can use the raw data without a second fetch.
 
 ## Consequences
 
 - `fetch | convert` works regardless of document order, since `convert` identifies
   documents by `kind` + `apiVersion`.
-- Users who want cleaned YAML (e.g. to commit a CR to git) must strip server-side
-  fields themselves. This is a deliberate choice — `fetch` does not try to be a
-  sanitisation tool.
+- `fetch` output is immediately usable: clean enough to commit to git, pipe into
+  other tools, or read by hand, without a manual stripping step.
+- The `fetcher/` package remains a faithful I/O layer; field stripping is a
+  presentation decision owned by the CLI.
 - The Catalog-first ordering is a stable convention: scripts that parse `fetch`
   output by position can rely on it.
