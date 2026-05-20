@@ -5,7 +5,9 @@ import click
 import yaml
 from yaml.resolver import BaseResolver
 
+import fetcher
 from converter import convert
+from fetcher import FetchError
 from preflight import PreflightError, run_preflight
 
 
@@ -38,6 +40,22 @@ def convert_cmd(input):
 
 
 cli.add_command(convert_cmd, name="convert")
+
+
+@cli.command()
+@click.option("--name", required=True)
+@click.option("--namespace", required=True)
+@click.option("--context", "context", default=None)
+def fetch_cmd(name, namespace, context):
+    try:
+        app, catalog = fetcher.fetch(name, namespace, context)
+    except FetchError as e:
+        click.echo(f"error: {e}", err=True)
+        raise SystemExit(1)
+    _dump([catalog, app])
+
+
+cli.add_command(fetch_cmd, name="fetch")
 
 
 if __name__ == "__main__":
