@@ -17,7 +17,7 @@ A Flux CD custom resource (`kind: OCIRepository`) that points to a Helm chart in
 _Avoid_: OCI source, chart source
 
 **Conversion**:
-The act of transforming one App CR into an OCIRepository + HelmRelease pair.
+The act of transforming an App CR and its Catalog CR into a Flux resource pair. Always receives two inputs: an App CR dict and a Catalog CR dict. Produces an OCIRepository + HelmRelease pair when `catalog_dict["spec"]["repositories"][].type` is `oci` (Path A), or a HelmRepository + HelmRelease pair when the type is `helm` (Path B).
 _Avoid_: migration (reserved for the broader live migration process), transformation
 
 **valuesFrom**:
@@ -40,38 +40,13 @@ _Avoid_: data key, values field
 A Giant Swarm custom resource (`kind: Catalog`) that describes a chart registry. `spec.repositories[].type` is `oci` or `helm`; `spec.repositories[].URL` is the registry URL. `spec.catalog` on an App CR is the name of a Catalog CR on the MC. Replaces the deprecated `AppCatalog` CR.
 _Avoid_: AppCatalog, catalog resource
 
-**GS catalog**:
-A Catalog CR owned and operated by Giant Swarm, backed by the OCI registry at `gsoci.azurecr.io`. All charts are addressed as `oci://gsoci.azurecr.io/charts/giantswarm/{chart-name}` — the `giantswarm` path segment is a fixed constant, not the catalog name. GS catalogs are identified by the pair `(spec.catalog, resolved-namespace)` — a name alone is insufficient because a non-GS catalog could share the same name in a different namespace. GS catalogs are either `public` (Catalog CR in the `default` namespace) or `internal` (Catalog CR in the `giantswarm` namespace). When `spec.catalogNamespace` is absent on an App CR, the resolved namespace is `default`.
-
-Known GS catalogs:
-
-| name | type | namespace |
-|---|---|---|
-| cluster | public | default |
-| cluster-test | internal | giantswarm |
-| control-plane-catalog | internal | giantswarm |
-| control-plane-test-catalog | internal | giantswarm |
-| default | internal | giantswarm |
-| default-test | internal | giantswarm |
-| giantswarm | public | default |
-| giantswarm-operations-platform | internal | giantswarm |
-| giantswarm-operations-platform-test | internal | giantswarm |
-| giantswarm-playground | internal | giantswarm |
-| giantswarm-playground-test | internal | giantswarm |
-| giantswarm-test | internal | giantswarm |
-| releases | internal | giantswarm |
-| releases-test | internal | giantswarm |
-
-App CRs referencing a GS catalog convert to an OCIRepository + HelmRelease pair.
-_Avoid_: internal catalog
-
-**Non-GS catalog**:
-A Catalog CR backed by a third-party HTTP Helm repository. The HTTP URL is not derivable from the App CR alone — it must be resolved by looking up the Catalog CR on the MC (`spec.repositories[type=helm].URL`). App CRs referencing a non-GS catalog convert to a HelmRepository + HelmRelease pair instead of an OCIRepository.
-_Avoid_: external catalog, third-party catalog
-
 **HelmRepository**:
-A Flux CD custom resource (`kind: HelmRepository`) that points to an HTTP-based Helm chart registry. Produced instead of an OCIRepository when the App CR references a non-GS catalog.
+A Flux CD custom resource (`kind: HelmRepository`) that points to an HTTP-based Helm chart registry. Produced when `catalog_dict["spec"]["repositories"][].type` is `helm`.
 _Avoid_: Helm repo source, chart repository resource
+
+**Fetch**:
+The act of pulling an App CR and its Catalog CR from the MC by name and namespace, using the Kubernetes API. The Catalog CR name and namespace are derived from `spec.catalog` and `spec.catalogNamespace` on the App CR (`default` when `spec.catalogNamespace` is absent). Always produces two dicts: the App CR and the Catalog CR. Implemented in the `fetcher/` package.
+_Avoid_: lookup, resolve, cluster fetch
 
 **app-operator**:
 The Giant Swarm operator that watches App CRs and translates them into Chart CRs. Resolves Catalog CRs, handles `kubeConfig` routing to remote clusters, and fans out `extraConfigs`/`config`/`userConfig` into a flat Chart CR.
@@ -106,12 +81,13 @@ Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR b
 
 ## Relationships
 
-- One **App CR** produces one **HelmRelease** plus either one **OCIRepository** (GS catalog) or one **HelmRepository** (non-GS catalog)
+- One **App CR** + one **Catalog CR** produce one **HelmRelease** plus either one **OCIRepository** (`type: oci`) or one **HelmRepository** (`type: helm`)
 - A **HelmRelease** references its chart source via `spec.chartRef` (OCIRepository) or `spec.chart.spec.sourceRef` (HelmRepository)
 - **valuesFrom** entries are derived from `spec.extraConfigs`, `spec.config`, and `spec.userConfig` on the **App CR**, merged in ascending **priority** order
 - A **live migration** wraps a **conversion**: suspension → apply converted resources → monitor
 - **app-operator** translates an **App CR** into a **Chart CR** by resolving the **Catalog CR**; **chart-operator** reconciles the **Chart CR** into a Helm release
-- `spec.catalog` on an **App CR** is the name of a **Catalog CR** on the MC; GS catalogs have a known OCI URL pattern, non-GS catalogs require a live lookup of the **Catalog CR** to obtain the HTTP URL
+- `spec.catalog` on an **App CR** is the name of a **Catalog CR** on the MC; the **Catalog CR**'s `spec.repositories[].type` (`oci` or `helm`) determines which Flux source resource the **Conversion** produces
+- A **Fetch** pulls an **App CR** and its **Catalog CR** from the MC and hands both dicts to a **Conversion**
 - A **remote-cluster app** carries a kubeconfig Secret reference on both the **App CR** (`spec.kubeConfig.secret.name`) and the converted **HelmRelease** (`spec.kubeConfig.secretRef.name`)
 
 ## Example dialogue
@@ -126,7 +102,7 @@ Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR b
 
 - `spec.install`, `spec.upgrade`, `spec.rollback`, `spec.uninstall` on App CRs are always empty `{}` in observed real data. Decision: the converter omits them entirely; non-empty blocks are out of scope.
 - `spec.config.configMap`, `spec.config.secret`, `spec.userConfig.configMap`, and `spec.userConfig.secret` sub-fields with an empty `name` are Go zero-value structs serialised to YAML — the App CR schema uses pointer-free structs so the field appears on the wire even when never populated. The converter skips these entries with a preflight warning, matching app-operator's behaviour. See ADR 0006.
-- The `giantswarm` segment in `oci://gsoci.azurecr.io/charts/giantswarm/{chart}` is a fixed constant for all GS catalogs — it does not vary with `spec.catalog`.
+
 
 ## Flagged ambiguities
 

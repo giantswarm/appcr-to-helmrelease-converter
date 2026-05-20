@@ -1,23 +1,32 @@
 # appcr-to-helmrelease-converter
 
-Reads one App CR from stdin (or a file), writes OCIRepository + HelmRelease to stdout (two YAML documents separated by `---`). See `CONTEXT.md` for domain terminology.
+Converts App CRs into Flux CD resources (OCIRepository or HelmRepository + HelmRelease). Three commands at different capability levels — see `CONTEXT.md` for domain terminology.
 
 ```bash
-kubectl -n giantswarm get app my-app -o yaml | python main.py convert
-cat my-app.yaml | python main.py convert
-python main.py convert my-app.yaml
+# Offline: multi-doc YAML (App CR + Catalog CR separated by ---) from stdin or file
+cat my-app-and-catalog.yaml | python main.py convert
+python main.py convert my-app-and-catalog.yaml
+
+# Cluster-aware: fetches both CRs from the MC by name
+python main.py convert-from-cluster --name my-app --namespace giantswarm
+python main.py convert-from-cluster --name my-app --namespace giantswarm --context my-context
+
+# Full live migration (planned)
+python main.py migrate --name my-app --namespace giantswarm
 ```
 
 ## Current state
 
 `converter/` package (pure functions) + click CLI in `main.py`. Dependencies: pyyaml, click.
 
+Planned: `fetcher/` package (I/O — fetches App CR + Catalog CR from MC via Python `kubernetes` client).
+
 ## Intended evolution
 
 ### Near term
 
-- Multi-document stdin support (multiple App CRs in one pipe)
-- CLI flags (e.g. OCI registry override)
+- Catalog CR as required second input; conversion path from `spec.repositories[].type` (see ADR 0007)
+- `convert-from-cluster` command: `--name`, `--namespace`, optional `--context` (see ADR 0008, ADR 0009)
 - Input validation
 
 ### Longer term: live migration wrapper
@@ -35,26 +44,31 @@ Package as a container image so the tool runs without a local Python environment
 
 ## Conversion rules
 
-Two conversion paths depending on `app.spec.catalog`. See `CONTEXT.md` for GS catalog vs non-GS catalog definitions.
+Two conversion paths depending on `catalog_dict["spec"]["repositories"][].type`. The Catalog CR is always required as a second input alongside the App CR. GS vs non-GS catalog distinction is human context only — the converter reads the type directly from the Catalog CR.
 
-**Path A — GS catalog → OCIRepository + HelmRelease**
+**Path A — `type: oci` → OCIRepository + HelmRelease**
 
 OCIRepository:
-- `spec.url`: `oci://gsoci.azurecr.io/charts/{catalog}/{app.spec.name}`
+- `spec.url`: `{catalog_dict["spec"]["repositories"][type=oci].URL.rstrip("/")}/{app.spec.name}`
 - `spec.ref.tag`: `app.spec.version` (exact pin; empty or missing version is a hard error)
 - interval: 10m, provider: generic
 
-**Path B — non-GS catalog → HelmRepository + HelmRelease** _(not yet implemented)_
+**Path B — `type: helm` → HelmRepository + HelmRelease** _(planned — see ADR 0007)_
 
 HelmRepository:
-- `spec.url`: looked up from the Catalog CR on the MC (`spec.repositories[type=helm].URL`)
-- The Catalog CR name equals `app.spec.catalog`
+- `spec.url`: first `catalog_dict["spec"]["repositories"][type=helm].URL`; preflight warning if multiple `helm` entries
+- `metadata.name` + `metadata.namespace`: same as the HelmRelease
+
+HelmRelease (Path B):
+- `spec.chart.spec.chart` ← `app.spec.name`
+- `spec.chart.spec.version` ← `app.spec.version`
+- `spec.chart.spec.sourceRef`: points to the HelmRepository by name + namespace
 
 **HelmRelease (both paths):**
 - `spec.storageNamespace` + `spec.targetNamespace` ← `app.spec.namespace`
 - `spec.releaseName` ← `app.metadata.name`
 - `spec.chartRef` points to the OCIRepository by name + namespace (Path A)
-- `spec.chart.spec.sourceRef` points to the HelmRepository (Path B, not yet implemented)
+- `spec.chart.spec.sourceRef` points to the HelmRepository (Path B — see ADR 0007)
 - Upgrade remediation: `remediateLastFailure: true`, strategy: rollback
 - Install remediation: `remediateLastFailure: false`, retries: 10
 
@@ -80,11 +94,11 @@ HelmRepository:
 
 Fields present in real App CRs that are not yet handled. Each item is a separate session scope.
 
-**1. catalog → OCI URL (GS catalogs)**
-Currently hardcoded to `giantswarm` catalog. Needs to derive the OCI URL from `app.spec.catalog` for all known GS catalogs. Pattern: `oci://gsoci.azurecr.io/charts/{catalog}/{chart}`.
+**1. catalog → OCI URL** _(planned — see ADR 0007)_
+Converter will read `spec.repositories[type=oci].URL` from the Catalog CR instead of the hardcoded URL. Requires the Catalog CR as a mandatory second input.
 
-**2. catalog → HelmRepository (non-GS catalogs)**
-Non-GS catalogs require a HelmRepository source instead of OCIRepository. The HTTP URL must be looked up from the Catalog CR on the MC. Requires the converter to accept Catalog CR input or a URL flag.
+**2. catalog → HelmRepository** _(planned — see ADR 0007, ADR 0008)_
+When `spec.repositories[].type == "helm"`, produce a HelmRepository + HelmRelease instead of OCIRepository. URL sourced from first `spec.repositories[type=helm].URL` entry; preflight warning if multiple. Path selection is purely from the Catalog CR type — no GS vs non-GS lookup needed.
 
 **3. kubeConfig — remote cluster targeting** ✓ _Implemented: emit `spec.kubeConfig.secretRef.name` on HelmRelease when `inCluster: false`. See commit 199bf5b._
 
@@ -96,6 +110,9 @@ Non-GS catalogs require a HelmRepository source instead of OCIRepository. The HT
 
 **7. Pre-flight checks / structured logging**
 Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should be replaced with a proper diagnostic layer: structured warnings, a `--strict` flag that turns warnings into errors, and/or a pre-flight validation pass that reports all issues before conversion begins.
+
+**8. fetcher/ package — cluster fetch for convert-from-cluster** _(planned — see ADR 0009)_
+New `fetcher/` I/O package wrapping the Python `kubernetes` client. Public interface: `fetch(name, namespace, context=None) -> (app_dict, catalog_dict)`. Fetches the App CR by name/namespace, derives Catalog CR coordinates from `spec.catalog` + `spec.catalogNamespace`, fetches the Catalog CR, and returns both as plain dicts. Required before `convert-from-cluster` can work end-to-end.
 
 ## Dev setup
 
