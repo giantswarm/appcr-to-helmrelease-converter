@@ -3,7 +3,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["main", "converter", "preflight"]
+source = ["main", "converter", "preflight", "fetcher"]
 
 [tool.coverage.report]
 fail_under = 100

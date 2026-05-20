@@ -17,9 +17,7 @@ python main.py migrate --name my-app --namespace giantswarm
 
 ## Current state
 
-`converter/` package (pure functions) + click CLI in `main.py`. Dependencies: pyyaml, click.
-
-Planned: `fetcher/` package (I/O — fetches App CR + Catalog CR from MC via Python `kubernetes` client).
+`converter/` package (pure functions) + `fetcher/` package (I/O) + click CLI in `main.py`. Dependencies: pyyaml, click, kubernetes.
 
 ## Intended evolution
 
@@ -111,8 +109,7 @@ When `spec.repositories[].type == "helm"`, produce a HelmRepository + HelmReleas
 **7. Pre-flight checks / structured logging**
 Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should be replaced with a proper diagnostic layer: structured warnings, a `--strict` flag that turns warnings into errors, and/or a pre-flight validation pass that reports all issues before conversion begins.
 
-**8. fetcher/ package — cluster fetch for convert-from-cluster** _(planned — see ADR 0009)_
-New `fetcher/` I/O package wrapping the Python `kubernetes` client. Public interface: `fetch(name, namespace, context=None) -> (app_dict, catalog_dict)`. Fetches the App CR by name/namespace, derives Catalog CR coordinates from `spec.catalog` + `spec.catalogNamespace`, fetches the Catalog CR, and returns both as plain dicts. Required before `convert-from-cluster` can work end-to-end.
+**8. fetcher/ package — cluster fetch for convert-from-cluster** ✓ _Implemented: `fetcher/` I/O package with `fetch(name, namespace, context=None) -> (app_dict, catalog_dict)`. Wraps ApiException in FetchError. See ADR 0009._
 
 ## Dev setup
 
@@ -131,3 +128,5 @@ pip install -r requirements-test.txt
 ```
 
 Coverage: branch coverage, 100% required, `if __name__ == '__main__':` excluded. Tests split across `tests/test_values_from.py`, `tests/test_resources.py`, `tests/test_converter.py`, `tests/test_main.py`.
+
+**Never run tests against a real Kubernetes cluster.** All code touching the `kubernetes` client must be testable via mocks only. Always patch `kubernetes.config.load_kube_config` and `kubernetes.client.*` in tests. No real kubeconfig loading, no real network calls, no real cluster context.
