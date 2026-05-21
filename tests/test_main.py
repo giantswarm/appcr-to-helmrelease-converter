@@ -48,51 +48,29 @@ _APP_DICT_WITH_SERVER_FIELDS = {
 }
 
 
-APP_WITH_NAMESPACE_CONFIG_YAML = """\
-apiVersion: application.giantswarm.io/v1alpha1
-kind: App
-metadata:
-  name: my-app
-  namespace: giantswarm
-spec:
-  name: my-app
-  namespace: monitoring
-  version: 1.2.3
-  namespaceConfig:
-    annotations:
-      linkerd.io/inject: enabled
-    labels:
-      some-label: some-value
-"""
+_APP_WITH_NAMESPACE_CONFIG = {
+    **_APP_DICT,
+    "spec": {**_APP_DICT["spec"], "namespaceConfig": {"annotations": {"linkerd.io/inject": "enabled"}}},
+}
 
-APP_WITH_KUBECONFIG_NAMESPACE_MISMATCH_YAML = """\
-apiVersion: application.giantswarm.io/v1alpha1
-kind: App
-metadata:
-  name: my-app
-  namespace: org-giantswarm
-spec:
-  name: my-app
-  namespace: monitoring
-  version: 1.2.3
-  kubeConfig:
-    inCluster: false
-    secret:
-      name: example-kubeconfig
-      namespace: other-ns
-"""
+_APP_WITH_KUBECONFIG_MISMATCH = {
+    "apiVersion": "application.giantswarm.io/v1alpha1",
+    "kind": "App",
+    "metadata": {"name": "my-app", "namespace": "org-giantswarm"},
+    "spec": {
+        "name": "my-app",
+        "namespace": "monitoring",
+        "version": "1.2.3",
+        "catalog": "giantswarm",
+        "kubeConfig": {"inCluster": False, "secret": {"name": "example-kubeconfig", "namespace": "other-ns"}},
+    },
+}
 
-MINIMAL_APP_YAML = """\
-apiVersion: application.giantswarm.io/v1alpha1
-kind: App
-metadata:
-  name: my-app
-  namespace: giantswarm
-spec:
-  name: my-app
-  namespace: monitoring
-  version: 1.2.3
-"""
+_NAMESPACE_CONFIG_MULTI_DOC = "---\n" + yaml.dump(_CATALOG_DICT) + "---\n" + yaml.dump(_APP_WITH_NAMESPACE_CONFIG)
+_KUBECONFIG_MISMATCH_MULTI_DOC = "---\n" + yaml.dump(_CATALOG_DICT) + "---\n" + yaml.dump(_APP_WITH_KUBECONFIG_MISMATCH)
+
+
+_MULTI_DOC_YAML = "---\n" + yaml.dump(_CATALOG_DICT) + "---\n" + yaml.dump(_APP_DICT)
 
 
 class TestConvertCommand:
@@ -100,44 +78,95 @@ class TestConvertCommand:
         runner = CliRunner()
         return runner.invoke(cli, ["convert"] + (args or []), input=input_text)
 
+    def test_multi_doc_input_succeeds(self):
+        result = self._run(input_text=_MULTI_DOC_YAML)
+        assert result.exit_code == 0
+
     def test_output_starts_with_separator(self):
-        result = self._run(input_text=MINIMAL_APP_YAML)
+        result = self._run(input_text=_MULTI_DOC_YAML)
         assert result.output.startswith("---\n")
 
     def test_output_contains_two_yaml_documents(self):
-        result = self._run(input_text=MINIMAL_APP_YAML)
+        result = self._run(input_text=_MULTI_DOC_YAML)
         docs = list(yaml.safe_load_all(result.output))
         assert len(docs) == 2
 
     def test_output_oci_repository_first(self):
-        result = self._run(input_text=MINIMAL_APP_YAML)
+        result = self._run(input_text=_MULTI_DOC_YAML)
         docs = list(yaml.safe_load_all(result.output))
         assert docs[0]["kind"] == "OCIRepository"
 
     def test_output_helm_release_second(self):
-        result = self._run(input_text=MINIMAL_APP_YAML)
+        result = self._run(input_text=_MULTI_DOC_YAML)
         docs = list(yaml.safe_load_all(result.output))
         assert docs[1]["kind"] == "HelmRelease"
 
     def test_exit_code_zero(self):
-        result = self._run(input_text=MINIMAL_APP_YAML)
+        result = self._run(input_text=_MULTI_DOC_YAML)
         assert result.exit_code == 0
 
     def test_preflight_warning_printed_to_stderr(self):
-        result = self._run(input_text=APP_WITH_NAMESPACE_CONFIG_YAML)
+        result = self._run(input_text=_NAMESPACE_CONFIG_MULTI_DOC)
         assert "warning:" in result.output
 
     def test_preflight_warning_exits_zero(self):
-        result = self._run(input_text=APP_WITH_NAMESPACE_CONFIG_YAML)
+        result = self._run(input_text=_NAMESPACE_CONFIG_MULTI_DOC)
         assert result.exit_code == 0
 
     def test_preflight_error_printed_to_stderr(self):
-        result = self._run(input_text=APP_WITH_KUBECONFIG_NAMESPACE_MISMATCH_YAML)
+        result = self._run(input_text=_KUBECONFIG_MISMATCH_MULTI_DOC)
         assert "error:" in result.output
 
     def test_preflight_error_exits_nonzero(self):
-        result = self._run(input_text=APP_WITH_KUBECONFIG_NAMESPACE_MISMATCH_YAML)
+        result = self._run(input_text=_KUBECONFIG_MISMATCH_MULTI_DOC)
         assert result.exit_code != 0
+
+    def test_missing_catalog_cr_exits_nonzero(self):
+        only_app = yaml.dump(_APP_DICT)
+        result = self._run(input_text=only_app)
+        assert result.exit_code != 0
+
+    def test_missing_catalog_cr_prints_error(self):
+        only_app = yaml.dump(_APP_DICT)
+        result = self._run(input_text=only_app)
+        assert "error:" in result.output
+
+    def test_missing_app_cr_exits_nonzero(self):
+        only_catalog = yaml.dump(_CATALOG_DICT)
+        result = self._run(input_text=only_catalog)
+        assert result.exit_code != 0
+
+    def test_missing_app_cr_prints_error(self):
+        only_catalog = yaml.dump(_CATALOG_DICT)
+        result = self._run(input_text=only_catalog)
+        assert "error:" in result.output
+
+    def test_duplicate_app_cr_exits_nonzero(self):
+        two_apps = "---\n" + yaml.dump(_CATALOG_DICT) + "---\n" + yaml.dump(_APP_DICT) + "---\n" + yaml.dump(_APP_DICT)
+        result = self._run(input_text=two_apps)
+        assert result.exit_code != 0
+
+    def test_duplicate_catalog_cr_exits_nonzero(self):
+        two_catalogs = "---\n" + yaml.dump(_CATALOG_DICT) + "---\n" + yaml.dump(_CATALOG_DICT) + "---\n" + yaml.dump(_APP_DICT)
+        result = self._run(input_text=two_catalogs)
+        assert result.exit_code != 0
+
+    def test_non_gs_docs_alongside_required_crs_are_ignored(self):
+        extra = {"apiVersion": "other.io/v1", "kind": "Something", "metadata": {"name": "x"}}
+        with_extra = "---\n" + yaml.dump(extra) + "---\n" + _MULTI_DOC_YAML
+        result = self._run(input_text=with_extra)
+        assert result.exit_code == 0
+
+    def test_empty_separator_docs_are_ignored(self):
+        with_empty = "---\n---\n" + _MULTI_DOC_YAML
+        result = self._run(input_text=with_empty)
+        assert result.exit_code == 0
+
+    def test_gs_versioned_unknown_kind_is_ignored(self):
+        unknown = {"apiVersion": "application.giantswarm.io/v1alpha1", "kind": "Chart", "metadata": {"name": "x"}}
+        with_unknown = "---\n" + yaml.dump(unknown) + "---\n" + _MULTI_DOC_YAML
+        result = self._run(input_text=with_unknown)
+        assert result.exit_code == 0
 
 
 class TestFetchCommand:

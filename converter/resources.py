@@ -3,10 +3,22 @@ from collections import OrderedDict
 from converter.values_from import calculate_values_from
 
 
-def build_oci_repository(app: dict) -> OrderedDict:
+def _oci_url_from_catalog(catalog: dict) -> str:
+    for repo in (catalog.get("spec") or {}).get("repositories") or []:
+        if repo.get("type") == "oci":
+            return repo["URL"]
+    storage = (catalog.get("spec") or {}).get("storage") or {}
+    if storage.get("type") == "oci":
+        return storage["URL"]
+    raise ValueError("catalog contains no oci repository")
+
+
+def build_oci_repository(app: dict, catalog: dict) -> OrderedDict:
     version = app["spec"].get("version")
     if not version:
         raise ValueError("spec.version is required but empty")
+    url_base = _oci_url_from_catalog(catalog)
+    url = f"{url_base.rstrip('/')}/{app['spec']['name']}"
     return OrderedDict([
         ("apiVersion", "source.toolkit.fluxcd.io/v1beta2"),
         ("kind", "OCIRepository"),
@@ -20,7 +32,7 @@ def build_oci_repository(app: dict) -> OrderedDict:
             ("ref", OrderedDict([
                 ("tag", version),
             ])),
-            ("url", f"oci://gsoci.azurecr.io/charts/giantswarm/{app['spec']['name']}"),
+            ("url", url),
         ]))
     ])
 

@@ -16,6 +16,10 @@ def _app(*, name="my-app", namespace="giantswarm", spec_name="my-app", spec_name
     return {"metadata": meta, "spec": spec}
 
 
+def _catalog(url="oci://gsoci.azurecr.io/charts/giantswarm"):
+    return {"spec": {"repositories": [{"type": "oci", "URL": url}]}}
+
+
 # ---------------------------------------------------------------------------
 # build_helm_release
 # ---------------------------------------------------------------------------
@@ -155,41 +159,58 @@ class TestBuildHelmRelease:
 
 class TestBuildOciRepository:
     def test_kind(self):
-        assert build_oci_repository(_app())["kind"] == "OCIRepository"
+        assert build_oci_repository(_app(), _catalog())["kind"] == "OCIRepository"
 
     def test_api_version(self):
-        assert build_oci_repository(_app())["apiVersion"] == "source.toolkit.fluxcd.io/v1beta2"
+        assert build_oci_repository(_app(), _catalog())["apiVersion"] == "source.toolkit.fluxcd.io/v1beta2"
 
     def test_metadata_name(self):
-        assert build_oci_repository(_app(name="my-app"))["metadata"]["name"] == "my-app"
+        assert build_oci_repository(_app(name="my-app"), _catalog())["metadata"]["name"] == "my-app"
 
     def test_metadata_namespace(self):
-        assert build_oci_repository(_app(namespace="giantswarm"))["metadata"]["namespace"] == "giantswarm"
+        assert build_oci_repository(_app(namespace="giantswarm"), _catalog())["metadata"]["namespace"] == "giantswarm"
 
-    def test_url_uses_spec_name(self):
-        assert build_oci_repository(_app(spec_name="kong-app"))["spec"]["url"] == \
-            "oci://gsoci.azurecr.io/charts/giantswarm/kong-app"
+    def test_url_uses_catalog_base_and_spec_name(self):
+        cat = _catalog(url="oci://example.io/charts")
+        assert build_oci_repository(_app(spec_name="kong-app"), cat)["spec"]["url"] == \
+            "oci://example.io/charts/kong-app"
+
+    def test_url_strips_trailing_slash_from_catalog(self):
+        cat = _catalog(url="oci://example.io/charts/")
+        assert build_oci_repository(_app(spec_name="my-app"), cat)["spec"]["url"] == \
+            "oci://example.io/charts/my-app"
 
     def test_interval(self):
-        assert build_oci_repository(_app())["spec"]["interval"] == "10m"
+        assert build_oci_repository(_app(), _catalog())["spec"]["interval"] == "10m"
 
     def test_provider(self):
-        assert build_oci_repository(_app())["spec"]["provider"] == "generic"
+        assert build_oci_repository(_app(), _catalog())["spec"]["provider"] == "generic"
 
     def test_ref_tag_from_spec_version(self):
-        assert build_oci_repository(_app())["spec"]["ref"]["tag"] == "1.0.0"
+        assert build_oci_repository(_app(), _catalog())["spec"]["ref"]["tag"] == "1.0.0"
 
     def test_ref_tag_reflects_spec_version_value(self):
-        assert build_oci_repository(_app(spec_extra={"version": "2.3.4"}))["spec"]["ref"]["tag"] == "2.3.4"
+        assert build_oci_repository(_app(spec_extra={"version": "2.3.4"}), _catalog())["spec"]["ref"]["tag"] == "2.3.4"
 
     def test_empty_version_raises(self):
         import pytest
         with pytest.raises(ValueError, match="spec.version"):
-            build_oci_repository(_app(spec_extra={"version": ""}))
+            build_oci_repository(_app(spec_extra={"version": ""}), _catalog())
 
     def test_missing_version_raises(self):
         import pytest
         app = _app()
         del app["spec"]["version"]
         with pytest.raises(ValueError, match="spec.version"):
-            build_oci_repository(app)
+            build_oci_repository(app, _catalog())
+
+    def test_storage_fallback_used_when_no_repositories(self):
+        cat = {"spec": {"storage": {"type": "oci", "URL": "oci://fallback.io/charts"}}}
+        result = build_oci_repository(_app(spec_name="my-app"), cat)
+        assert result["spec"]["url"] == "oci://fallback.io/charts/my-app"
+
+    def test_catalog_with_no_oci_type_raises(self):
+        import pytest
+        cat = {"spec": {"repositories": [{"type": "helm", "URL": "https://charts.example.io"}]}}
+        with pytest.raises(ValueError, match="no oci repository"):
+            build_oci_repository(_app(), cat)

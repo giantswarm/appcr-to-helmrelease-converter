@@ -53,18 +53,48 @@ def cli():
     pass
 
 
+_GS_API_VERSION = "application.giantswarm.io/v1alpha1"
+
+
+def _identify_docs(content: str) -> tuple[dict, dict]:
+    app, catalog = None, None
+    for doc in yaml.safe_load_all(content):
+        if doc is None:
+            continue
+        if doc.get("apiVersion") != _GS_API_VERSION:
+            continue
+        kind = doc.get("kind")
+        if kind == "App":
+            if app is not None:
+                raise ValueError("duplicate App CR in input")
+            app = doc
+        elif kind == "Catalog":
+            if catalog is not None:
+                raise ValueError("duplicate Catalog CR in input")
+            catalog = doc
+    if app is None:
+        raise ValueError("App CR not found in input")
+    if catalog is None:
+        raise ValueError("Catalog CR not found in input")
+    return app, catalog
+
+
 @cli.command()
 @click.argument("input", type=click.File("r"), default="-")
 def convert_cmd(input):
     content = input.read()
-    app = yaml.safe_load(content)
+    try:
+        app, catalog = _identify_docs(content)
+    except ValueError as e:
+        click.echo(f"error: {e}", err=True)
+        raise SystemExit(1)
     issues = run_preflight(app)
     for issue in issues:
         level = "error" if isinstance(issue, PreflightError) else "warning"
         click.echo(f"{level}: {issue}", err=True)
     if any(isinstance(i, PreflightError) for i in issues):
         raise SystemExit(1)
-    _dump(convert(content))
+    _dump(convert(app, catalog))
 
 
 cli.add_command(convert_cmd, name="convert")
