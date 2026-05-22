@@ -96,8 +96,7 @@ HelmRelease (Path B):
 
 Fields present in real App CRs that are not yet handled. Each item is a separate session scope.
 
-**1a. converter — Catalog CR integration (Path A + Path B)** _(Path A done; Path B open — see ADR 0007)_
-Interface `convert(app_dict, catalog_dict)` implemented. `_oci_url_from_catalog()` checks `spec.repositories` first, falls back to `spec.storage`, raises on missing OCI entry. Path A (OCI → OCIRepository + HelmRelease) is fully implemented. **Path B (helm → HelmRepository + HelmRelease) is not yet implemented**: a catalog with only `type: helm` entries currently raises a hard error instead of producing a HelmRepository. Missing: `build_helm_repository()`, `spec.chart` block in HelmRelease, branching in `convert()`, preflight warning for multiple `helm` entries.
+**1a. converter — Catalog CR integration (Path A + Path B)** ✓ _Implemented. `convert()` branches on catalog type. OCI present → Path A: `build_helm_release_and_oci_repo()` → [OCIRepository, HelmRelease with `spec.chartRef`]. Helm only → Path B: `build_helm_release_and_helm_repo()` → [HelmRepository, HelmRelease with `spec.chart.spec`]. Both paths share boilerplate via `_build_helm_release_common()`. Preflight warning in `main.py` when catalog has multiple `helm` entries (uses first). `spec.storage` fallback supported for both paths. See ADR 0007._
 
 **1b. `convert` command — multi-doc YAML input** ✓ _Implemented: `_identify_docs()` with `yaml.safe_load_all()`, identifies by `kind` + `apiVersion: application.giantswarm.io/v1alpha1`, hard-errors on missing or duplicate docs, order-independent. See ADR 0007, ADR 0011._
 

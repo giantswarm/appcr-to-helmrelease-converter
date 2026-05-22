@@ -43,7 +43,7 @@ Repository type and URL are read using this lookup order:
 1. `spec.repositories[]` (current field) — array of `{type, URL}` entries. `oci` is preferred over `helm` if both are present.
 2. `spec.storage` (deprecated) — single `{type, URL}` object; same shape as one `spec.repositories` entry. Used as fallback when `spec.repositories` is absent or null.
 
-Hard error if neither field yields a recognised type (`oci` or `helm`).
+Hard error if neither field yields a recognised type (`oci` or `helm`). If multiple `helm` entries are present, the first URL is used and a preflight warning is emitted.
 _Avoid_: AppCatalog, catalog resource
 
 **HelmRepository**:

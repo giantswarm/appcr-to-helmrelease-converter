@@ -1,6 +1,6 @@
 from collections import OrderedDict
 
-from converter.resources import build_oci_repository, build_helm_release
+from converter.resources import build_oci_repository, build_helm_release, build_helm_release_and_helm_repo
 
 
 def _app(*, name="my-app", namespace="giantswarm", spec_name="my-app", spec_namespace="monitoring",
@@ -214,3 +214,102 @@ class TestBuildOciRepository:
         cat = {"spec": {"repositories": [{"type": "helm", "URL": "https://charts.example.io"}]}}
         with pytest.raises(ValueError, match="no oci repository"):
             build_oci_repository(_app(), cat)
+
+
+# ---------------------------------------------------------------------------
+# build_helm_release_and_helm_repo
+# ---------------------------------------------------------------------------
+
+def _helm_catalog(url="https://charts.example.io"):
+    return {"spec": {"repositories": [{"type": "helm", "URL": url}]}}
+
+
+class TestBuildHelmReleaseAndHelmRepo:
+    def test_returns_two_documents(self):
+        pair = build_helm_release_and_helm_repo(_app(), _helm_catalog())
+        assert len(pair) == 2
+
+    def test_first_doc_is_helm_repository(self):
+        assert build_helm_release_and_helm_repo(_app(), _helm_catalog())[0]["kind"] == "HelmRepository"
+
+    def test_helm_repository_api_version(self):
+        assert build_helm_release_and_helm_repo(_app(), _helm_catalog())[0]["apiVersion"] == "source.toolkit.fluxcd.io/v1"
+
+    def test_helm_repository_metadata_name(self):
+        assert build_helm_release_and_helm_repo(_app(name="my-app"), _helm_catalog())[0]["metadata"]["name"] == "my-app"
+
+    def test_helm_repository_metadata_namespace(self):
+        assert build_helm_release_and_helm_repo(_app(namespace="giantswarm"), _helm_catalog())[0]["metadata"]["namespace"] == "giantswarm"
+
+    def test_helm_repository_url_from_catalog(self):
+        cat = _helm_catalog(url="https://charts.example.io/stable")
+        assert build_helm_release_and_helm_repo(_app(), cat)[0]["spec"]["url"] == "https://charts.example.io/stable"
+
+    def test_second_doc_is_helm_release(self):
+        assert build_helm_release_and_helm_repo(_app(), _helm_catalog())[1]["kind"] == "HelmRelease"
+
+    def test_helm_release_has_no_chart_ref(self):
+        hr = build_helm_release_and_helm_repo(_app(), _helm_catalog())[1]
+        assert "chartRef" not in hr["spec"]
+
+    def test_helm_release_chart_spec_chart_from_spec_name(self):
+        hr = build_helm_release_and_helm_repo(_app(spec_name="my-app"), _helm_catalog())[1]
+        assert hr["spec"]["chart"]["spec"]["chart"] == "my-app"
+
+    def test_helm_release_chart_spec_version_from_spec_version(self):
+        hr = build_helm_release_and_helm_repo(_app(spec_extra={"version": "3.1.4"}), _helm_catalog())[1]
+        assert hr["spec"]["chart"]["spec"]["version"] == "3.1.4"
+
+    def test_helm_release_chart_source_ref_kind(self):
+        hr = build_helm_release_and_helm_repo(_app(), _helm_catalog())[1]
+        assert hr["spec"]["chart"]["spec"]["sourceRef"]["kind"] == "HelmRepository"
+
+    def test_helm_release_chart_source_ref_name_from_app_metadata(self):
+        hr = build_helm_release_and_helm_repo(_app(name="my-app"), _helm_catalog())[1]
+        assert hr["spec"]["chart"]["spec"]["sourceRef"]["name"] == "my-app"
+
+    def test_helm_release_chart_source_ref_namespace_from_app_metadata(self):
+        hr = build_helm_release_and_helm_repo(_app(namespace="giantswarm"), _helm_catalog())[1]
+        assert hr["spec"]["chart"]["spec"]["sourceRef"]["namespace"] == "giantswarm"
+
+    def test_helm_release_has_interval(self):
+        assert build_helm_release_and_helm_repo(_app(), _helm_catalog())[1]["spec"]["interval"] == "5m"
+
+    def test_helm_release_has_install_remediation(self):
+        hr = build_helm_release_and_helm_repo(_app(), _helm_catalog())[1]
+        assert hr["spec"]["install"]["remediation"]["retries"] == 10
+
+    def test_helm_release_has_upgrade_remediation(self):
+        hr = build_helm_release_and_helm_repo(_app(), _helm_catalog())[1]
+        assert hr["spec"]["upgrade"]["remediation"]["remediateLastFailure"] is True
+
+    def test_empty_version_raises(self):
+        import pytest
+        with pytest.raises(ValueError, match="spec.version"):
+            build_helm_release_and_helm_repo(_app(spec_extra={"version": ""}), _helm_catalog())
+
+    def test_missing_version_raises(self):
+        import pytest
+        app = _app()
+        del app["spec"]["version"]
+        with pytest.raises(ValueError, match="spec.version"):
+            build_helm_release_and_helm_repo(app, _helm_catalog())
+
+    def test_storage_fallback_used_when_no_repositories(self):
+        cat = {"spec": {"storage": {"type": "helm", "URL": "https://fallback.example.io"}}}
+        result = build_helm_release_and_helm_repo(_app(), cat)
+        assert result[0]["spec"]["url"] == "https://fallback.example.io"
+
+    def test_catalog_with_no_helm_type_raises(self):
+        import pytest
+        cat = {"spec": {"repositories": [{"type": "oci", "URL": "oci://example.io/charts"}]}}
+        with pytest.raises(ValueError, match="no helm repository"):
+            build_helm_release_and_helm_repo(_app(), cat)
+
+    def test_non_helm_repo_before_helm_repo_uses_helm_url(self):
+        cat = {"spec": {"repositories": [
+            {"type": "s3", "URL": "s3://ignored"},
+            {"type": "helm", "URL": "https://charts.example.io"},
+        ]}}
+        result = build_helm_release_and_helm_repo(_app(), cat)
+        assert result[0]["spec"]["url"] == "https://charts.example.io"

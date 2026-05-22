@@ -13,6 +13,24 @@ def _oci_url_from_catalog(catalog: dict) -> str:
     raise ValueError("catalog contains no oci repository")
 
 
+def _helm_url_from_catalog(catalog: dict) -> str:
+    for repo in (catalog.get("spec") or {}).get("repositories") or []:
+        if repo.get("type") == "helm":
+            return repo["URL"]
+    storage = (catalog.get("spec") or {}).get("storage") or {}
+    if storage.get("type") == "helm":
+        return storage["URL"]
+    raise ValueError("catalog contains no helm repository")
+
+
+def build_helm_release_and_oci_repo(app: dict, catalog: dict) -> list:
+    return [build_oci_repository(app, catalog), build_helm_release(app)]
+
+
+def build_helm_release_and_helm_repo(app: dict, catalog: dict) -> list:
+    return [_build_helm_repository(app, catalog), _build_helm_release_helm(app)]
+
+
 def build_oci_repository(app: dict, catalog: dict) -> OrderedDict:
     version = app["spec"].get("version")
     if not version:
@@ -37,6 +55,22 @@ def build_oci_repository(app: dict, catalog: dict) -> OrderedDict:
     ])
 
 
+def _build_helm_repository(app: dict, catalog: dict) -> OrderedDict:
+    url = _helm_url_from_catalog(catalog)
+    return OrderedDict([
+        ("apiVersion", "source.toolkit.fluxcd.io/v1"),
+        ("kind", "HelmRepository"),
+        ("metadata", OrderedDict([
+            ("name", app["metadata"]["name"]),
+            ("namespace", app["metadata"]["namespace"]),
+        ])),
+        ("spec", OrderedDict([
+            ("interval", "10m"),
+            ("url", url),
+        ])),
+    ])
+
+
 _ANNOTATION_BLOCKLIST = {
     "chart-operator.giantswarm.io/force-helm-upgrade",
     "app-operator.giantswarm.io/paused",
@@ -47,7 +81,7 @@ _LABEL_BLOCKLIST = {
 }
 
 
-def build_helm_release(app: dict) -> OrderedDict:
+def _build_helm_release_common(app: dict) -> OrderedDict:
     hr = OrderedDict([
         ("apiVersion", "helm.toolkit.fluxcd.io/v2"),
         ("kind", "HelmRelease"),
@@ -56,11 +90,6 @@ def build_helm_release(app: dict) -> OrderedDict:
             ("namespace", app["metadata"]["namespace"]),
         ])),
         ("spec", OrderedDict([
-            ("chartRef", OrderedDict([
-                ("kind", "OCIRepository"),
-                ("name", app["metadata"]["name"]),
-                ("namespace", app["metadata"]["namespace"]),
-            ])),
             ("install", OrderedDict([
                 ("remediation", OrderedDict([
                     ("remediateLastFailure", False),
@@ -108,4 +137,33 @@ def build_helm_release(app: dict) -> OrderedDict:
     if values_from:
         hr["spec"]["valuesFrom"] = values_from
 
+    return hr
+
+
+def build_helm_release(app: dict) -> OrderedDict:
+    hr = _build_helm_release_common(app)
+    hr["spec"]["chartRef"] = OrderedDict([
+        ("kind", "OCIRepository"),
+        ("name", app["metadata"]["name"]),
+        ("namespace", app["metadata"]["namespace"]),
+    ])
+    return hr
+
+
+def _build_helm_release_helm(app: dict) -> OrderedDict:
+    version = app["spec"].get("version")
+    if not version:
+        raise ValueError("spec.version is required but empty")
+    hr = _build_helm_release_common(app)
+    hr["spec"]["chart"] = OrderedDict([
+        ("spec", OrderedDict([
+            ("chart", app["spec"]["name"]),
+            ("sourceRef", OrderedDict([
+                ("kind", "HelmRepository"),
+                ("name", app["metadata"]["name"]),
+                ("namespace", app["metadata"]["namespace"]),
+            ])),
+            ("version", version),
+        ])),
+    ])
     return hr

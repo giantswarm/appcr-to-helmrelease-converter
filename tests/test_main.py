@@ -66,9 +66,19 @@ _APP_WITH_KUBECONFIG_MISMATCH = {
     },
 }
 
+_CATALOG_MULTI_HELM = {
+    "apiVersion": "application.giantswarm.io/v1alpha1",
+    "kind": "Catalog",
+    "metadata": {"name": "example", "namespace": "giantswarm"},
+    "spec": {"repositories": [
+        {"type": "helm", "URL": "https://charts.example.io"},
+        {"type": "helm", "URL": "https://mirror.example.io"},
+    ]},
+}
+
 _NAMESPACE_CONFIG_MULTI_DOC = "---\n" + yaml.dump(_CATALOG_DICT) + "---\n" + yaml.dump(_APP_WITH_NAMESPACE_CONFIG)
 _KUBECONFIG_MISMATCH_MULTI_DOC = "---\n" + yaml.dump(_CATALOG_DICT) + "---\n" + yaml.dump(_APP_WITH_KUBECONFIG_MISMATCH)
-
+_MULTI_HELM_MULTI_DOC = "---\n" + yaml.dump(_CATALOG_MULTI_HELM) + "---\n" + yaml.dump(_APP_DICT)
 
 _MULTI_DOC_YAML = "---\n" + yaml.dump(_CATALOG_DICT) + "---\n" + yaml.dump(_APP_DICT)
 
@@ -167,6 +177,25 @@ class TestConvertCommand:
         with_unknown = "---\n" + yaml.dump(unknown) + "---\n" + _MULTI_DOC_YAML
         result = self._run(input_text=with_unknown)
         assert result.exit_code == 0
+
+    def test_multiple_helm_repos_emits_warning(self):
+        result = self._run(input_text=_MULTI_HELM_MULTI_DOC)
+        assert "warning:" in result.output
+
+    def test_multiple_helm_repos_exits_zero(self):
+        result = self._run(input_text=_MULTI_HELM_MULTI_DOC)
+        assert result.exit_code == 0
+
+    def test_single_helm_repo_no_warning(self):
+        single_helm = {
+            "apiVersion": "application.giantswarm.io/v1alpha1",
+            "kind": "Catalog",
+            "metadata": {"name": "example", "namespace": "giantswarm"},
+            "spec": {"repositories": [{"type": "helm", "URL": "https://charts.example.io"}]},
+        }
+        multi_doc = "---\n" + yaml.dump(single_helm) + "---\n" + yaml.dump(_APP_DICT)
+        result = self._run(input_text=multi_doc)
+        assert "warning:" not in result.output
 
 
 class TestFetchCommand:

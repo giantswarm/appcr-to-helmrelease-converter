@@ -79,6 +79,13 @@ def _identify_docs(content: str) -> tuple[dict, dict]:
     return app, catalog
 
 
+def _count_helm_repos(catalog: dict) -> int:
+    return sum(
+        1 for repo in (catalog.get("spec") or {}).get("repositories") or []
+        if repo.get("type") == "helm"
+    )
+
+
 @cli.command()
 @click.argument("input", type=click.File("r"), default="-")
 def convert_cmd(input):
@@ -88,6 +95,8 @@ def convert_cmd(input):
     except ValueError as e:
         click.echo(f"error: {e}", err=True)
         raise SystemExit(1)
+    if _count_helm_repos(catalog) > 1:
+        click.echo("warning: catalog has multiple helm repositories; using the first", err=True)
     issues = run_preflight(app)
     for issue in issues:
         level = "error" if isinstance(issue, PreflightError) else "warning"

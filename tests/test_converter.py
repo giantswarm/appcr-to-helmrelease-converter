@@ -130,3 +130,36 @@ class TestConvert:
 
     def test_no_labels_in_app_produces_no_labels_key(self):
         assert "labels" not in convert(MINIMAL_APP, MINIMAL_CATALOG)[1]["metadata"]
+
+
+HELM_CATALOG = {
+    "apiVersion": "application.giantswarm.io/v1alpha1",
+    "kind": "Catalog",
+    "metadata": {"name": "example", "namespace": "giantswarm"},
+    "spec": {"repositories": [{"type": "helm", "URL": "https://charts.example.io"}]},
+}
+
+
+class TestConvertPathB:
+    def test_returns_two_documents(self):
+        assert len(convert(MINIMAL_APP, HELM_CATALOG)) == 2
+
+    def test_first_doc_is_helm_repository(self):
+        assert convert(MINIMAL_APP, HELM_CATALOG)[0]["kind"] == "HelmRepository"
+
+    def test_second_doc_is_helm_release(self):
+        assert convert(MINIMAL_APP, HELM_CATALOG)[1]["kind"] == "HelmRelease"
+
+    def test_helm_release_has_chart_spec_not_chart_ref(self):
+        hr = convert(MINIMAL_APP, HELM_CATALOG)[1]
+        assert "chart" in hr["spec"]
+        assert "chartRef" not in hr["spec"]
+
+    def test_oci_preferred_when_both_types_present(self):
+        both = {
+            "spec": {"repositories": [
+                {"type": "helm", "URL": "https://charts.example.io"},
+                {"type": "oci", "URL": "oci://example.io/charts"},
+            ]}
+        }
+        assert convert(MINIMAL_APP, both)[0]["kind"] == "OCIRepository"
