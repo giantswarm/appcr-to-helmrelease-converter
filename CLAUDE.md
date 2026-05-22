@@ -96,14 +96,12 @@ HelmRelease (Path B):
 
 Fields present in real App CRs that are not yet handled. Each item is a separate session scope.
 
-**1a. converter — Catalog CR integration (Path A + Path B)** _(designed — see ADR 0007)_
-Change converter interface to `convert(app_dict, catalog_dict)`. Read URL and path from Catalog CR: check `spec.repositories` first (prefer `oci` over `helm`), fall back to deprecated `spec.storage`. Hard error if no recognised type. Path A produces OCIRepository + HelmRelease; Path B produces HelmRepository + HelmRelease.
+**1a. converter — Catalog CR integration (Path A + Path B)** _(Path A done; Path B open — see ADR 0007)_
+Interface `convert(app_dict, catalog_dict)` implemented. `_oci_url_from_catalog()` checks `spec.repositories` first, falls back to `spec.storage`, raises on missing OCI entry. Path A (OCI → OCIRepository + HelmRelease) is fully implemented. **Path B (helm → HelmRepository + HelmRelease) is not yet implemented**: a catalog with only `type: helm` entries currently raises a hard error instead of producing a HelmRepository. Missing: `build_helm_repository()`, `spec.chart` block in HelmRelease, branching in `convert()`, preflight warning for multiple `helm` entries.
 
-**1b. `convert` command — multi-doc YAML input** _(designed — see ADR 0007)_
-Change `convert` to parse multi-doc YAML via `yaml.safe_load_all()`. Identify App CR and Catalog CR by both `kind` and `apiVersion: application.giantswarm.io/v1alpha1`. Hard error on missing or duplicate docs. Document order is not significant.
+**1b. `convert` command — multi-doc YAML input** ✓ _Implemented: `_identify_docs()` with `yaml.safe_load_all()`, identifies by `kind` + `apiVersion: application.giantswarm.io/v1alpha1`, hard-errors on missing or duplicate docs, order-independent. See ADR 0007, ADR 0011._
 
-**1c. `fetch` command** _(designed — see ADR 0008, ADR 0010)_
-New CLI command: `--name`, `--namespace`, optional `--context`. Calls `fetcher.fetch()`, emits raw multi-doc YAML (Catalog CR first, App CR second). Pipeable into `convert`.
+**1c. `fetch` command** ✓ _Implemented: `--name`, `--namespace`, optional `--context`; emits Catalog CR first, App CR second; strips server-side metadata fields and `kubectl.kubernetes.io/last-applied-configuration` annotation in `main.py`. See ADR 0008, ADR 0010._
 
 **1d. `fetch-and-convert` command** _(designed — see ADR 0008)_
 New CLI command: `--name`, `--namespace`, optional `--context`. Calls `fetcher.fetch()` then passes both dicts directly to the converter. End-to-end cluster → Flux YAML in one step.
