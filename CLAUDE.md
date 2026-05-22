@@ -102,8 +102,7 @@ Fields present in real App CRs that are not yet handled. Each item is a separate
 
 **1c. `fetch` command** ✓ _Implemented: `--name`, `--namespace`, optional `--context`; emits Catalog CR first, App CR second; strips server-side metadata fields and `kubectl.kubernetes.io/last-applied-configuration` annotation in `main.py`. See ADR 0008, ADR 0010._
 
-**1d. `fetch-and-convert` command** _(designed — see ADR 0008)_
-New CLI command: `--name`, `--namespace`, optional `--context`. Calls `fetcher.fetch()` then passes both dicts directly to the converter. End-to-end cluster → Flux YAML in one step.
+**1d. `fetch-and-convert` command** ✓ _Implemented: `--name`, `--namespace`, optional `--context`; calls `fetcher.fetch()`, runs multiple-helm-repo and preflight checks, then converts and dumps Flux YAML. Preflight errors exit nonzero; warnings print and continue. No server-field stripping — raw CRs go straight to converter. See ADR 0008._
 
 **3. kubeConfig — remote cluster targeting** ✓ _Implemented: emit `spec.kubeConfig.secretRef.name` on HelmRelease when `inCluster: false`. See commit 199bf5b._
 

@@ -4,7 +4,7 @@ Date: 2026-05-20
 
 ## Status
 
-Accepted
+Accepted. `fetch`, `convert`, and `fetch-and-convert` are implemented. `migrate` is reserved but not yet implemented.
 
 ## Context
 

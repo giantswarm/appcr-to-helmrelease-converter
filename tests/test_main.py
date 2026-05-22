@@ -3,6 +3,7 @@ from unittest.mock import patch
 import yaml
 from click.testing import CliRunner
 
+from fetcher import FetchError
 from main import cli
 
 
@@ -279,6 +280,87 @@ class TestFetchCommand:
         docs = list(yaml.safe_load_all(result.output))
         app_meta = docs[1]["metadata"]
         assert app_meta.get("labels", {}).get("app") == "my-app"
+
+
+class TestFetchAndConvertCommand:
+    def _run(self, args=None):
+        runner = CliRunner()
+        return runner.invoke(cli, ["fetch-and-convert"] + (args or []))
+
+    def _args(self):
+        return ["--name", "my-app", "--namespace", "giantswarm"]
+
+    def test_exit_code_zero_on_success(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+
+    def test_output_starts_with_separator(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args())
+        assert result.output.startswith("---\n")
+
+    def test_output_oci_repository_first(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args())
+        docs = list(yaml.safe_load_all(result.output))
+        assert docs[0]["kind"] == "OCIRepository"
+
+    def test_output_helm_release_second(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args())
+        docs = list(yaml.safe_load_all(result.output))
+        assert docs[1]["kind"] == "HelmRelease"
+
+    def test_fetch_error_exits_nonzero(self):
+        with patch("fetcher.fetch", side_effect=FetchError("App giantswarm/my-app not found")):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+
+    def test_fetch_error_message_printed(self):
+        with patch("fetcher.fetch", side_effect=FetchError("App giantswarm/my-app not found")):
+            result = self._run(self._args())
+        assert "error:" in result.output
+
+    def test_context_forwarded_to_fetcher(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)) as mock_fetch:
+            self._run(self._args() + ["--context", "my-context"])
+        mock_fetch.assert_called_once_with("my-app", "giantswarm", "my-context")
+
+    def test_no_context_passes_none_to_fetcher(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)) as mock_fetch:
+            self._run(self._args())
+        mock_fetch.assert_called_once_with("my-app", "giantswarm", None)
+
+    def test_multiple_helm_repos_emits_warning(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_MULTI_HELM)):
+            result = self._run(self._args())
+        assert "warning:" in result.output
+
+    def test_multiple_helm_repos_exits_zero(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_MULTI_HELM)):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+
+    def test_preflight_warning_printed(self):
+        with patch("fetcher.fetch", return_value=(_APP_WITH_NAMESPACE_CONFIG, _CATALOG_DICT)):
+            result = self._run(self._args())
+        assert "warning:" in result.output
+
+    def test_preflight_warning_exits_zero(self):
+        with patch("fetcher.fetch", return_value=(_APP_WITH_NAMESPACE_CONFIG, _CATALOG_DICT)):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+
+    def test_preflight_error_printed(self):
+        with patch("fetcher.fetch", return_value=(_APP_WITH_KUBECONFIG_MISMATCH, _CATALOG_DICT)):
+            result = self._run(self._args())
+        assert "error:" in result.output
+
+    def test_preflight_error_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=(_APP_WITH_KUBECONFIG_MISMATCH, _CATALOG_DICT)):
+            result = self._run(self._args())
+        assert result.exit_code != 0
 
 
 class TestStripServerFields:

@@ -58,6 +58,10 @@ _Avoid_: lookup, resolve, cluster fetch
 The CLI command that runs a Fetch and emits the result as a two-document YAML stream (Catalog CR first, App CR second). Takes `--name`, `--namespace`, and optional `--context`. Server-side metadata fields (`uid`, `resourceVersion`, `generation`, `creationTimestamp`, `selfLink`, `managedFields`) and the `kubectl.kubernetes.io/last-applied-configuration` annotation are stripped before output; all other fields are preserved. Designed to be pipeable into `convert`.
 _Avoid_: fetch command (without backticks in prose)
 
+**`fetch-and-convert` command**:
+The CLI command that performs a Fetch and a Conversion in a single step. Takes `--name`, `--namespace`, and optional `--context`. Calls `fetcher.fetch()` and passes both dicts directly to the converter — no YAML serialisation or stripping in between. Runs the same preflight checks as `convert`: multiple-helm-repo warning (non-fatal), preflight warnings (non-fatal), preflight errors (fatal, exits nonzero). Emits Flux YAML to stdout. The in-memory path from cluster to Flux YAML — `fetch` + `convert` without a pipe.
+_Avoid_: fetch-and-convert command (without backticks in prose)
+
 **app-operator**:
 The Giant Swarm operator that watches App CRs and translates them into Chart CRs. Resolves Catalog CRs, handles `kubeConfig` routing to remote clusters, and fans out `extraConfigs`/`config`/`userConfig` into a flat Chart CR.
 _Avoid_: app operator (no hyphen)
@@ -98,6 +102,7 @@ Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR b
 - **app-operator** translates an **App CR** into a **Chart CR** by resolving the **Catalog CR**; **chart-operator** reconciles the **Chart CR** into a Helm release
 - `spec.catalog` on an **App CR** is the name of a **Catalog CR** on the MC; the **Catalog CR**'s `spec.repositories[].type` (`oci` or `helm`) determines which Flux source resource the **Conversion** produces
 - A **Fetch** pulls an **App CR** and its **Catalog CR** from the MC and hands both dicts to a **Conversion**
+- The **`fetch-and-convert` command** combines a **Fetch** and a **Conversion** in memory — equivalent to `fetch | convert` without the YAML serialisation step
 - A **remote-cluster app** carries a kubeconfig Secret reference on both the **App CR** (`spec.kubeConfig.secret.name`) and the converted **HelmRelease** (`spec.kubeConfig.secretRef.name`)
 
 ## Example dialogue

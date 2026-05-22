@@ -125,5 +125,29 @@ def fetch_cmd(name, namespace, context):
 cli.add_command(fetch_cmd, name="fetch")
 
 
+@cli.command()
+@click.option("--name", required=True)
+@click.option("--namespace", required=True)
+@click.option("--context", "context", default=None)
+def fetch_and_convert_cmd(name, namespace, context):
+    try:
+        app, catalog = fetcher.fetch(name, namespace, context)
+    except FetchError as e:
+        click.echo(f"error: {e}", err=True)
+        raise SystemExit(1)
+    if _count_helm_repos(catalog) > 1:
+        click.echo("warning: catalog has multiple helm repositories; using the first", err=True)
+    issues = run_preflight(app)
+    for issue in issues:
+        level = "error" if isinstance(issue, PreflightError) else "warning"
+        click.echo(f"{level}: {issue}", err=True)
+    if any(isinstance(i, PreflightError) for i in issues):
+        raise SystemExit(1)
+    _dump(convert(app, catalog))
+
+
+cli.add_command(fetch_and_convert_cmd, name="fetch-and-convert")
+
+
 if __name__ == "__main__":
     cli()
