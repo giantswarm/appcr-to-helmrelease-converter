@@ -112,7 +112,7 @@ Fields present in real App CRs that are not yet handled. Each item is a separate
 
 **6. install/upgrade/rollback/uninstall blocks** ✓ _Decided: omit. All 51 occurrences in real data are empty `{}`. The converter emits nothing for these fields; non-empty blocks are not a supported input._
 
-**7. Pre-flight checks / structured logging**
+**7. Pre-flight checks / structured logging** _(deferred — not a priority)_
 Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should be replaced with a proper diagnostic layer: structured warnings, a `--strict` flag that turns warnings into errors, and/or a pre-flight validation pass that reports all issues before conversion begins.
 
 **8. fetcher/ package — cluster fetch for fetch-and-convert** ✓ _Implemented: `fetcher/` I/O package with `fetch(name, namespace, context=None) -> (app_dict, catalog_dict)`. Wraps ApiException in FetchError. See ADR 0009._
