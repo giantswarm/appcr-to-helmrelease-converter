@@ -117,8 +117,7 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **8. fetcher/ package — cluster fetch for fetch-and-convert** ✓ _Implemented: `fetcher/` I/O package with `fetch(name, namespace, context=None) -> (app_dict, catalog_dict)`. Wraps ApiException in FetchError. See ADR 0009._
 
-**9. `migrate` command** _(not started — see ADR 0012)_
-Full live migration: fetch → preflight → convert → suspend operators (App CR on MC, Chart CR on MC or WC) → apply Flux resources → monitor HelmRelease → revert or confirm. MC client from `--context`; WC client built internally from kubeconfig Secret on MC. Chart CR name derived by stripping cluster ID prefix/suffix from App CR name. Interactive by default with `--yes` to skip prompts. Monitoring via `--timeout` (default `10m`) and `--poll-interval` (default `10s`). On failure or timeout: revert-or-leave prompt; partial revert continues through all steps and reports all failures. 409 on apply → hard error. Open: terminal HelmRelease reason values, clean HR stop before revert on timeout, leave-for-inspection kubectl commands, success output.
+**9. `migrate` command** _(not started — design TBD)_
 
 ## Dev setup
 
