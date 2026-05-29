@@ -1,32 +1,38 @@
-class PreflightWarning(Exception):
+class PreflightIssue(Exception):
     pass
 
 
-class PreflightError(Exception):
+class PreflightWarning(PreflightIssue):
     pass
 
 
-def check_kube_config(app: dict) -> None:
+class PreflightError(PreflightIssue):
+    pass
+
+
+def check_kube_config(app: dict) -> list[PreflightIssue]:
     kube_config = app.get("spec", {}).get("kubeConfig", {})
     if not kube_config or kube_config.get("inCluster"):
-        return
+        return []
     secret_ns = kube_config.get("secret", {}).get("namespace")
     app_ns = app["metadata"]["namespace"]
     if secret_ns and secret_ns != app_ns:
-        raise PreflightError(
+        return [PreflightError(
             f'spec.kubeConfig.secret.namespace "{secret_ns}" does not match app namespace "{app_ns}";'
             " Flux requires the kubeconfig Secret to be in the same namespace as the HelmRelease"
-        )
+        )]
+    return []
 
 
-def check_namespace_config(app: dict) -> None:
+def check_namespace_config(app: dict) -> list[PreflightIssue]:
     if app.get("spec", {}).get("namespaceConfig"):
-        raise PreflightWarning(
+        return [PreflightWarning(
             "spec.namespaceConfig dropped (no HelmRelease equivalent; target namespace already exists)"
-        )
+        )]
+    return []
 
 
-def check_empty_values_from_names(app: dict) -> list:
+def check_empty_values_from_names(app: dict) -> list[PreflightIssue]:
     issues = []
     spec = app.get("spec", {})
     _FIELDS = [
@@ -45,13 +51,5 @@ def check_empty_values_from_names(app: dict) -> list:
 _CHECKS = [check_kube_config, check_namespace_config, check_empty_values_from_names]
 
 
-def run_preflight(app: dict) -> list:
-    issues = []
-    for check in _CHECKS:
-        try:
-            result = check(app)
-            if result:
-                issues.extend(result)
-        except (PreflightWarning, PreflightError) as e:
-            issues.append(e)
-    return issues
+def run_preflight(app: dict) -> list[PreflightIssue]:
+    return [issue for check in _CHECKS for issue in check(app)]
