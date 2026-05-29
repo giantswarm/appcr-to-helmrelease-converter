@@ -1,8 +1,11 @@
+import io
 import sys
 from collections import OrderedDict
 
 import click
 import yaml
+from rich.console import Console
+from rich.syntax import Syntax
 from yaml.resolver import BaseResolver
 
 import fetcher
@@ -39,13 +42,24 @@ def _strip_server_fields(doc: dict) -> dict:
     return {**doc, "metadata": stripped}
 
 
-def _dump(docs):
+def _to_yaml_str(docs) -> str:
     def ordered_dict_representer(dumper, data):
         return dumper.represent_mapping(BaseResolver.DEFAULT_MAPPING_TAG, data.items())
 
     yaml.add_representer(OrderedDict, ordered_dict_representer)
-    print("---")
-    yaml.dump_all(docs, sys.stdout, sort_keys=False, default_flow_style=False)
+    buf = io.StringIO()
+    yaml.dump_all(docs, buf, sort_keys=False, default_flow_style=False)
+    return "---\n" + buf.getvalue()
+
+
+def _dump(docs):
+    print(_to_yaml_str(docs), end="")
+
+
+def _dump_highlighted(docs):
+    Console(file=sys.stdout, highlight=False).print(
+        Syntax(_to_yaml_str(docs), "yaml", theme="monokai", word_wrap=True)
+    )
 
 
 @click.group()
@@ -77,6 +91,12 @@ def _identify_docs(content: str) -> tuple[dict, dict]:
     if catalog is None:
         raise ValueError("Catalog CR not found in input")
     return app, catalog
+
+
+def _section(title: str) -> None:
+    con = Console(file=sys.stdout, highlight=False)
+    con.print()
+    con.rule(f"[bold cyan]▌ {title}[/bold cyan]", align="left")
 
 
 def _check_and_emit(app: dict, catalog: dict) -> None:
@@ -136,6 +156,55 @@ def fetch_and_convert_cmd(name, namespace, context):
 
 
 cli.add_command(fetch_and_convert_cmd, name="fetch-and-convert")
+
+
+@cli.command()
+@click.option("--name", required=True)
+@click.option("--namespace", required=True)
+@click.option("--context", "context", default=None)
+def migrate_cmd(name, namespace, context):
+    _section("Fetch")
+    click.echo(f'Fetching "{name}" from namespace "{namespace}"...')
+    try:
+        app, catalog = fetcher.fetch(name, namespace, context)
+    except FetchError as e:
+        click.echo("", err=True)
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+    app_version = app.get("spec", {}).get("version", "")
+    app_catalog = app.get("spec", {}).get("catalog", "")
+    catalog_meta_name = catalog.get("metadata", {}).get("name", "")
+    repos = (catalog.get("spec") or {}).get("repositories") or []
+    catalog_type = repos[0].get("type", "unknown") if repos else "unknown"
+    click.echo("")
+    click.echo(f"App CR:     {name} (version: {app_version}, catalog: {app_catalog})")
+    click.echo("")
+    click.echo(f"Catalog CR: {catalog_meta_name} (type: {catalog_type})")
+
+    _section("Preflight checks")
+    issues = run_preflight(app, catalog)
+    warnings = [i for i in issues if not isinstance(i, PreflightError)]
+    errors = [i for i in issues if isinstance(i, PreflightError)]
+    for issue in warnings + errors:
+        click.echo(issue.display(), err=True)
+    if errors:
+        raise SystemExit(1)
+    if not issues:
+        click.echo("No issues found")
+    else:
+        click.echo(f"{len(warnings)} warning(s), 0 errors")
+
+    _section("Generated Flux resources")
+    docs = convert(app, catalog)
+    _dump_highlighted(docs)
+
+    _section("Confirm")
+    if not click.confirm("Proceed with live migration?"):
+        raise SystemExit(0)
+    click.echo("live migration not yet implemented", err=True)
+
+
+cli.add_command(migrate_cmd, name="migrate")
 
 
 if __name__ == "__main__":

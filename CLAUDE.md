@@ -119,7 +119,7 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **9. `migrate` command** _(high-level design done — see ADR 0012. Implementation split into sub-tasks below.)_
 
-**9a. `migrate` command skeleton** _(not started)_ Wire the click command (`--name`, `--namespace`, `--context`); reuse `fetcher.fetch()`, `run_preflight()`, `converter.convert()`; print Flux YAML and prompt for confirmation. Read-only phases only — no live mutations.
+**9a. `migrate` command skeleton** ✓ _Implemented: click command with `--name`, `--namespace`, `--context`; reuses `fetcher.fetch()`, `run_preflight()`, `converter.convert()`; section headers via Rich (`▌ Title ───`), syntax-highlighted YAML (monokai), confirmation prompt. ConfigException from invalid context caught and surfaced cleanly. Read-only — no live mutations._
 
 **9b. Suspend App CR** _(not started)_ Detect Flux-managed App CR (`kustomize.toolkit.fluxcd.io/name` + `namespace` labels); add `kustomize.toolkit.fluxcd.io/reconcile: disabled` if needed; add `app-operator.giantswarm.io/paused` annotation. Idempotent. Lays `migrator/` package foundation.
 

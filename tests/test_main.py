@@ -363,6 +363,99 @@ class TestFetchAndConvertCommand:
         assert result.exit_code != 0
 
 
+class TestMigrateCommand:
+    def _run(self, args=None, input_text=None):
+        runner = CliRunner()
+        return runner.invoke(cli, ["migrate"] + (args or []), input=input_text)
+
+    def _args(self):
+        return ["--name", "my-app", "--namespace", "giantswarm"]
+
+    def test_fetch_error_exits_nonzero(self):
+        with patch("fetcher.fetch", side_effect=FetchError("App giantswarm/my-app not found")):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+
+    def test_fetch_error_message_printed(self):
+        with patch("fetcher.fetch", side_effect=FetchError("App giantswarm/my-app not found")):
+            result = self._run(self._args())
+        assert "❌" in result.output
+
+    def test_preflight_error_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=(_APP_WITH_KUBECONFIG_MISMATCH, _CATALOG_DICT)):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+
+    def test_preflight_warning_continues(self):
+        with patch("fetcher.fetch", return_value=(_APP_WITH_NAMESPACE_CONFIG, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="n\n")
+        assert "⚠️" in result.output
+
+    def test_flux_yaml_printed_to_stdout(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="n\n")
+        assert "---" in result.output
+
+    def test_flux_yaml_contains_helm_release(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="n\n")
+        assert "kind: HelmRelease" in result.output
+
+    def test_user_declines_exits_zero(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="n\n")
+        assert result.exit_code == 0
+
+    def test_user_confirms_prints_not_implemented(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="y\n")
+        assert "not yet implemented" in result.output
+
+    def test_user_confirms_exits_zero(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="y\n")
+        assert result.exit_code == 0
+
+    def test_context_forwarded_to_fetcher(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)) as mock_fetch:
+            self._run(self._args() + ["--context", "my-context"], input_text="n\n")
+        mock_fetch.assert_called_once_with("my-app", "giantswarm", "my-context")
+
+    def test_no_context_passes_none_to_fetcher(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)) as mock_fetch:
+            self._run(self._args(), input_text="n\n")
+        mock_fetch.assert_called_once_with("my-app", "giantswarm", None)
+
+    def test_section_headers_appear_in_output(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="n\n")
+        assert "Fetch" in result.output
+        assert "Preflight" in result.output
+        assert "Generated Flux resources" in result.output
+        assert "Confirm" in result.output
+
+    def test_fetch_step_shows_app_name_and_version(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="n\n")
+        assert "my-app" in result.output
+        assert "1.2.3" in result.output
+
+    def test_fetch_step_shows_catalog_type(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="n\n")
+        assert "oci" in result.output
+
+    def test_no_issues_message_when_preflight_clean(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="n\n")
+        assert "No issues found" in result.output
+
+    def test_preflight_summary_shown_when_warnings(self):
+        with patch("fetcher.fetch", return_value=(_APP_WITH_NAMESPACE_CONFIG, _CATALOG_DICT)):
+            result = self._run(self._args(), input_text="n\n")
+        assert "warning" in result.output.lower()
+
+
 class TestStripServerFields:
     def setup_method(self):
         from main import _strip_server_fields
