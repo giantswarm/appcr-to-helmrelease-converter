@@ -90,6 +90,17 @@ _Avoid_: management plane, control cluster
 The broader operational process of suspending an App CR, applying the converted Flux resources, and monitoring the rollout. Distinct from a conversion, which is only the resource translation step.
 _Avoid_: migration (ambiguous — always qualify as "live migration")
 
+**Chart CR**:
+A Giant Swarm custom resource (`kind: Chart`) created by app-operator for each App CR. Watched by chart-operator, which drives the actual Helm install/upgrade. Always lives in the `giantswarm` namespace on the cluster where chart-operator runs: the MC for in-cluster apps, the WC for remote-cluster apps.
+
+Name is derived from the App CR name by stripping the `cluster_id` prefix and suffix (both applied in sequence) using the `giantswarm.io/cluster` label on the App CR:
+```
+chart_name = app_name.removeprefix(f"{cluster_id}-")
+chart_name = chart_name.removesuffix(f"-{cluster_id}")
+```
+For in-cluster apps the label is absent and no stripping is applied — Chart CR name equals App CR name.
+_Avoid_: chart resource, helm chart CR
+
 **Suspension**:
 Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR by setting the respective `paused` annotations, so Flux can take ownership without conflict.
 

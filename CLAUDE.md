@@ -117,7 +117,21 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **8. fetcher/ package — cluster fetch for fetch-and-convert** ✓ _Implemented: `fetcher/` I/O package with `fetch(name, namespace, context=None) -> (app_dict, catalog_dict)`. Wraps ApiException in FetchError. See ADR 0009._
 
-**9. `migrate` command** _(not started — design TBD)_
+**9. `migrate` command** _(high-level design done — see ADR 0012. Implementation split into sub-tasks below.)_
+
+**9a. `migrate` command skeleton** _(not started)_ Wire the click command (`--name`, `--namespace`, `--context`); reuse `fetcher.fetch()`, `run_preflight()`, `converter.convert()`; print Flux YAML and prompt for confirmation. Read-only phases only — no live mutations.
+
+**9b. Suspend App CR** _(not started)_ Detect Flux-managed App CR (`kustomize.toolkit.fluxcd.io/name` + `namespace` labels); add `kustomize.toolkit.fluxcd.io/reconcile: disabled` if needed; add `app-operator.giantswarm.io/paused` annotation. Idempotent. Lays `migrator/` package foundation.
+
+**9c. Suspend Chart CR** _(not started)_ Derive Chart CR name from `giantswarm.io/cluster` label on App CR; determine MC vs WC client; add `chart-operator.giantswarm.io/paused`. Two-client problem lives here. See CONTEXT.md for Chart CR name derivation rules.
+
+**9d. Apply** _(not started)_ Apply HelmRelease + OCIRepository or HelmRepository to MC. Idempotent.
+
+**9e. Monitor** _(not started)_ Watch HelmRelease status until ready or user aborts.
+
+**9f. Revert** _(not started)_ Full revert sequence: suspend HR → delete HR + source → resume Chart CR → resume App CR → remove `reconcile: disabled` label if added. Idempotent. Includes skip-revert + print manual steps path.
+
+**9g. Success cleanup** _(not started)_ Flux-managed: print instructions to manually delete App CR + Chart CR. Non-Flux-managed: prompt and delete both.
 
 ## Dev setup
 
