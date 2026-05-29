@@ -118,7 +118,7 @@ class TestConvertCommand:
 
     def test_preflight_warning_printed_to_stderr(self):
         result = self._run(input_text=_NAMESPACE_CONFIG_MULTI_DOC)
-        assert "warning:" in result.output
+        assert "⚠️" in result.output
 
     def test_preflight_warning_exits_zero(self):
         result = self._run(input_text=_NAMESPACE_CONFIG_MULTI_DOC)
@@ -126,7 +126,7 @@ class TestConvertCommand:
 
     def test_preflight_error_printed_to_stderr(self):
         result = self._run(input_text=_KUBECONFIG_MISMATCH_MULTI_DOC)
-        assert "error:" in result.output
+        assert "❌" in result.output
 
     def test_preflight_error_exits_nonzero(self):
         result = self._run(input_text=_KUBECONFIG_MISMATCH_MULTI_DOC)
@@ -181,7 +181,7 @@ class TestConvertCommand:
 
     def test_multiple_helm_repos_emits_warning(self):
         result = self._run(input_text=_MULTI_HELM_MULTI_DOC)
-        assert "warning:" in result.output
+        assert "⚠️" in result.output
 
     def test_multiple_helm_repos_exits_zero(self):
         result = self._run(input_text=_MULTI_HELM_MULTI_DOC)
@@ -196,7 +196,7 @@ class TestConvertCommand:
         }
         multi_doc = "---\n" + yaml.dump(single_helm) + "---\n" + yaml.dump(_APP_DICT)
         result = self._run(input_text=multi_doc)
-        assert "warning:" not in result.output
+        assert "⚠️" not in result.output
 
 
 class TestFetchCommand:
@@ -335,7 +335,7 @@ class TestFetchAndConvertCommand:
     def test_multiple_helm_repos_emits_warning(self):
         with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_MULTI_HELM)):
             result = self._run(self._args())
-        assert "warning:" in result.output
+        assert "⚠️" in result.output
 
     def test_multiple_helm_repos_exits_zero(self):
         with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_MULTI_HELM)):
@@ -345,7 +345,7 @@ class TestFetchAndConvertCommand:
     def test_preflight_warning_printed(self):
         with patch("fetcher.fetch", return_value=(_APP_WITH_NAMESPACE_CONFIG, _CATALOG_DICT)):
             result = self._run(self._args())
-        assert "warning:" in result.output
+        assert "⚠️" in result.output
 
     def test_preflight_warning_exits_zero(self):
         with patch("fetcher.fetch", return_value=(_APP_WITH_NAMESPACE_CONFIG, _CATALOG_DICT)):
@@ -355,7 +355,7 @@ class TestFetchAndConvertCommand:
     def test_preflight_error_printed(self):
         with patch("fetcher.fetch", return_value=(_APP_WITH_KUBECONFIG_MISMATCH, _CATALOG_DICT)):
             result = self._run(self._args())
-        assert "error:" in result.output
+        assert "❌" in result.output
 
     def test_preflight_error_exits_nonzero(self):
         with patch("fetcher.fetch", return_value=(_APP_WITH_KUBECONFIG_MISMATCH, _CATALOG_DICT)):

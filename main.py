@@ -79,11 +79,14 @@ def _identify_docs(content: str) -> tuple[dict, dict]:
     return app, catalog
 
 
-def _count_helm_repos(catalog: dict) -> int:
-    return sum(
-        1 for repo in (catalog.get("spec") or {}).get("repositories") or []
-        if repo.get("type") == "helm"
-    )
+def _check_and_emit(app: dict, catalog: dict) -> None:
+    issues = run_preflight(app, catalog)
+    warnings = [i for i in issues if not isinstance(i, PreflightError)]
+    errors = [i for i in issues if isinstance(i, PreflightError)]
+    for issue in warnings + errors:
+        click.echo(issue.display(), err=True)
+    if errors:
+        raise SystemExit(1)
 
 
 @cli.command()
@@ -95,14 +98,7 @@ def convert_cmd(input):
     except ValueError as e:
         click.echo(f"error: {e}", err=True)
         raise SystemExit(1)
-    if _count_helm_repos(catalog) > 1:
-        click.echo("warning: catalog has multiple helm repositories; using the first", err=True)
-    issues = run_preflight(app)
-    for issue in issues:
-        level = "error" if isinstance(issue, PreflightError) else "warning"
-        click.echo(f"{level}: {issue}", err=True)
-    if any(isinstance(i, PreflightError) for i in issues):
-        raise SystemExit(1)
+    _check_and_emit(app, catalog)
     _dump(convert(app, catalog))
 
 
@@ -135,14 +131,7 @@ def fetch_and_convert_cmd(name, namespace, context):
     except FetchError as e:
         click.echo(f"error: {e}", err=True)
         raise SystemExit(1)
-    if _count_helm_repos(catalog) > 1:
-        click.echo("warning: catalog has multiple helm repositories; using the first", err=True)
-    issues = run_preflight(app)
-    for issue in issues:
-        level = "error" if isinstance(issue, PreflightError) else "warning"
-        click.echo(f"{level}: {issue}", err=True)
-    if any(isinstance(i, PreflightError) for i in issues):
-        raise SystemExit(1)
+    _check_and_emit(app, catalog)
     _dump(convert(app, catalog))
 
 

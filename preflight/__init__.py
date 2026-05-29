@@ -3,14 +3,16 @@ class PreflightIssue(Exception):
 
 
 class PreflightWarning(PreflightIssue):
-    pass
+    def display(self) -> str:
+        return f"⚠️  {self}"
 
 
 class PreflightError(PreflightIssue):
-    pass
+    def display(self) -> str:
+        return f"❌ {self}"
 
 
-def check_kube_config(app: dict) -> list[PreflightIssue]:
+def check_kube_config(app: dict, catalog: dict) -> list[PreflightIssue]:
     kube_config = app.get("spec", {}).get("kubeConfig", {})
     if not kube_config or kube_config.get("inCluster"):
         return []
@@ -24,7 +26,7 @@ def check_kube_config(app: dict) -> list[PreflightIssue]:
     return []
 
 
-def check_namespace_config(app: dict) -> list[PreflightIssue]:
+def check_namespace_config(app: dict, catalog: dict) -> list[PreflightIssue]:
     if app.get("spec", {}).get("namespaceConfig"):
         return [PreflightWarning(
             "spec.namespaceConfig dropped (no HelmRelease equivalent; target namespace already exists)"
@@ -32,7 +34,7 @@ def check_namespace_config(app: dict) -> list[PreflightIssue]:
     return []
 
 
-def check_empty_values_from_names(app: dict) -> list[PreflightIssue]:
+def check_empty_values_from_names(app: dict, catalog: dict) -> list[PreflightIssue]:
     issues = []
     spec = app.get("spec", {})
     _FIELDS = [
@@ -48,8 +50,23 @@ def check_empty_values_from_names(app: dict) -> list[PreflightIssue]:
     return issues
 
 
-_CHECKS = [check_kube_config, check_namespace_config, check_empty_values_from_names]
+def check_multiple_helm_repos(app: dict, catalog: dict) -> list[PreflightIssue]:
+    count = sum(
+        1 for repo in (catalog.get("spec") or {}).get("repositories") or []
+        if repo.get("type") == "helm"
+    )
+    if count > 1:
+        return [PreflightWarning("catalog has multiple helm repositories; using the first")]
+    return []
 
 
-def run_preflight(app: dict) -> list[PreflightIssue]:
-    return [issue for check in _CHECKS for issue in check(app)]
+_CHECKS = [
+    check_kube_config,
+    check_namespace_config,
+    check_empty_values_from_names,
+    check_multiple_helm_repos,
+]
+
+
+def run_preflight(app: dict, catalog: dict) -> list[PreflightIssue]:
+    return [issue for check in _CHECKS for issue in check(app, catalog)]
