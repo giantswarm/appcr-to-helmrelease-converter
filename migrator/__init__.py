@@ -109,4 +109,4 @@ def load_wc_client(core_api: client.CoreV1Api, secret_name: str, secret_namespac
 # Step classes — imported last so the partial module satisfies their `from . import` references
 from .disable_flux_reconcile_app import DisableFluxReconcileApp  # noqa: E402
 from .suspend_app import SuspendApp  # noqa: E402
-from .suspend_chart_cr import SuspendChart  # noqa: E402
+from .suspend_chart import SuspendChart  # noqa: E402
