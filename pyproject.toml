@@ -3,10 +3,11 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["main", "converter", "preflight", "fetcher"]
+source = ["main", "converter", "preflight", "fetcher", "migrator"]
 
 [tool.coverage.report]
 fail_under = 100
 exclude_lines = [
     "if __name__ == .__main__.:",
+    "@abstractmethod",
 ]

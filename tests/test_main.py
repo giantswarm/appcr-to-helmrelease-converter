@@ -1,9 +1,11 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import yaml
 from click.testing import CliRunner
+from kubernetes.client.exceptions import ApiException
 
 from fetcher import FetchError
+from migrator import MigratorError
 from main import cli
 
 
@@ -406,15 +408,95 @@ class TestMigrateCommand:
             result = self._run(self._args(), input_text="n\n")
         assert result.exit_code == 0
 
-    def test_user_confirms_prints_not_implemented(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
-            result = self._run(self._args(), input_text="y\n")
-        assert "not yet implemented" in result.output
+    def _mock_api(self):
+        return MagicMock()
 
-    def test_user_confirms_exits_zero(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+    def test_confirms_exits_zero(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._mock_api()):
             result = self._run(self._args(), input_text="y\n")
         assert result.exit_code == 0
+
+    def test_suspend_section_shown(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._mock_api()):
+            result = self._run(self._args(), input_text="y\n")
+        assert "Suspend giantswarm/my-app" in result.output
+
+    def test_step_description_shown_with_checkmark_on_success(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._mock_api()):
+            result = self._run(self._args(), input_text="y\n")
+        assert "✅" in result.output
+        assert "app-operator.giantswarm.io/paused" in result.output
+
+    def test_skipped_flux_step_shows_info_message(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._mock_api()):
+            result = self._run(self._args(), input_text="y\n")
+        assert "kustomize.toolkit.fluxcd.io/name" in result.output
+        assert "not detected" in result.output
+
+    def test_load_client_error_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", side_effect=MigratorError("bad context")):
+            result = self._run(self._args(), input_text="y\n")
+        assert result.exit_code != 0
+
+    def test_load_client_error_message_printed(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", side_effect=MigratorError("bad context")):
+            result = self._run(self._args(), input_text="y\n")
+        assert "bad context" in result.output
+
+    def test_step_failure_exits_nonzero(self):
+        api = MagicMock()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=api):
+            result = self._run(self._args(), input_text="y\ny\n")
+        assert result.exit_code != 0
+
+    def test_step_failure_message_printed(self):
+        api = MagicMock()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=api):
+            result = self._run(self._args(), input_text="y\ny\n")
+        assert "failed to patch App" in result.output
+
+    def test_step_failure_asks_to_revert(self):
+        api = MagicMock()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=api):
+            result = self._run(self._args(), input_text="y\ny\n")
+        assert "Revert changes?" in result.output
+
+    def test_step_failure_reverts_when_confirmed(self):
+        api = MagicMock()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=api):
+            result = self._run(self._args(), input_text="y\ny\n")
+        assert "Reverting" in result.output
+
+    def test_step_failure_skips_revert_when_declined(self):
+        api = MagicMock()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=api):
+            result = self._run(self._args(), input_text="y\nn\n")
+        assert "Skipping revert" in result.output
+
+    def test_revert_failure_message_printed(self):
+        api = MagicMock()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=api), \
+             patch("migrator.MigrationRunner.revert_all", side_effect=MigratorError("revert boom")):
+            result = self._run(self._args(), input_text="y\ny\n")
+        assert "revert failed" in result.output
 
     def test_context_forwarded_to_fetcher(self):
         with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)) as mock_fetch:

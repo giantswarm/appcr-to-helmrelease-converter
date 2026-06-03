@@ -9,6 +9,7 @@ from rich.syntax import Syntax
 from yaml.resolver import BaseResolver
 
 import fetcher
+import migrator
 from converter import convert
 from fetcher import FetchError
 from preflight import PreflightError, run_preflight
@@ -201,7 +202,36 @@ def migrate_cmd(name, namespace, context):
     _section("Confirm")
     if not click.confirm("Proceed with live migration?"):
         raise SystemExit(0)
-    click.echo("live migration not yet implemented", err=True)
+
+    _section(f"Suspend {namespace}/{name}")
+    try:
+        api = migrator.load_client(context)
+    except migrator.MigratorError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+
+    runner = migrator.MigrationRunner()
+    steps = [migrator.DisableFluxReconcileApp(api, app), migrator.SuspendApp(api, app)]
+
+    for step in steps:
+        try:
+            runner.run(step)
+        except migrator.MigratorError as e:
+            click.echo(f"❌ {e}", err=True)
+            if click.confirm("Revert changes?", default=True):
+                click.echo("Reverting...", err=True)
+                try:
+                    runner.revert_all()
+                except migrator.MigratorError as revert_err:
+                    click.echo(f"❌ revert failed: {revert_err}", err=True)
+                    click.echo("Some changes may need to be reverted manually.", err=True)
+            else:
+                click.echo("Skipping revert. Manual steps required to undo changes.", err=True)
+            raise SystemExit(1)
+        if step.skipped:
+            click.echo(f"ℹ️ {step.skip_message}")
+        else:
+            click.echo(f"✅ {step.description}")
 
 
 cli.add_command(migrate_cmd, name="migrate")

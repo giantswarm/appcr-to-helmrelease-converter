@@ -121,7 +121,7 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **9a. `migrate` command skeleton** ✓ _Implemented: click command with `--name`, `--namespace`, `--context`; reuses `fetcher.fetch()`, `run_preflight()`, `converter.convert()`; section headers via Rich (`▌ Title ───`), syntax-highlighted YAML (monokai), confirmation prompt. ConfigException from invalid context caught and surfaced cleanly. Read-only — no live mutations._
 
-**9b. Suspend App CR** _(not started)_ Detect Flux-managed App CR (`kustomize.toolkit.fluxcd.io/name` + `namespace` labels); add `kustomize.toolkit.fluxcd.io/reconcile: disabled` if needed; add `app-operator.giantswarm.io/paused` annotation. Idempotent. Lays `migrator/` package foundation.
+**9b. Suspend App CR** ✓ _Implemented: `DisableFluxReconcileApp` + `SuspendApp` steps in `migrator/` package. Detects Flux-managed App CR (`kustomize.toolkit.fluxcd.io/name` + `namespace` labels); adds `kustomize.toolkit.fluxcd.io/reconcile: disabled` if needed; adds `app-operator.giantswarm.io/paused` annotation. Idempotent. See commit 2bb096d._
 
 **9c. Suspend Chart CR** _(not started)_ Derive Chart CR name from `giantswarm.io/cluster` label on App CR; determine MC vs WC client; add `chart-operator.giantswarm.io/paused`. Two-client problem lives here. See CONTEXT.md for Chart CR name derivation rules.
 
