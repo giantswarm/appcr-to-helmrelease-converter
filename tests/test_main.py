@@ -535,8 +535,8 @@ class TestMigrateCommand:
             self._run(self._args(), input_text="y\n")
         mock_load_wc.assert_not_called()
 
-    def test_remote_cluster_app_calls_load_wc_client(self):
-        _app_remote = {
+    def _remote_app(self):
+        return {
             **_APP_DICT,
             "spec": {
                 **_APP_DICT["spec"],
@@ -546,13 +546,31 @@ class TestMigrateCommand:
                 },
             },
         }
+
+    def test_remote_cluster_app_calls_load_wc_client(self):
         mock_wc_api = MagicMock()
-        with patch("fetcher.fetch", return_value=(_app_remote, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=(self._remote_app(), _CATALOG_DICT)), \
              patch("migrator.load_client", return_value=self._mock_api()), \
              patch("migrator.core_client", return_value=MagicMock()), \
              patch("migrator.load_wc_client", return_value=mock_wc_api) as mock_load_wc:
             self._run(self._args(), input_text="y\n")
         mock_load_wc.assert_called_once()
+
+    def test_load_wc_client_error_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=(self._remote_app(), _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._mock_api()), \
+             patch("migrator.core_client", return_value=MagicMock()), \
+             patch("migrator.load_wc_client", side_effect=MigratorError("bad kubeconfig secret")):
+            result = self._run(self._args(), input_text="y\n")
+        assert result.exit_code != 0
+
+    def test_load_wc_client_error_message_printed(self):
+        with patch("fetcher.fetch", return_value=(self._remote_app(), _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._mock_api()), \
+             patch("migrator.core_client", return_value=MagicMock()), \
+             patch("migrator.load_wc_client", side_effect=MigratorError("bad kubeconfig secret")):
+            result = self._run(self._args(), input_text="y\n")
+        assert "bad kubeconfig secret" in result.output
 
     def test_fetch_step_shows_catalog_type(self):
         with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):

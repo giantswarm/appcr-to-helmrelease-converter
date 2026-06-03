@@ -216,7 +216,11 @@ def migrate_cmd(name, namespace, context):
         secret = kube.get("secret") or {}
         secret_name = secret.get("name", "")
         secret_ns = secret.get("namespace") or namespace
-        chart_api = migrator.load_wc_client(migrator.core_client(), secret_name, secret_ns)
+        try:
+            chart_api = migrator.load_wc_client(migrator.core_client(), secret_name, secret_ns)
+        except migrator.MigratorError as e:
+            click.echo(f"❌ {e}", err=True)
+            raise SystemExit(1)
     else:
         chart_api = api
     steps = [
