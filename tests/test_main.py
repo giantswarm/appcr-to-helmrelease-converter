@@ -522,6 +522,38 @@ class TestMigrateCommand:
         assert "my-app" in result.output
         assert "1.2.3" in result.output
 
+    def test_suspend_chart_cr_step_shown_on_success(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._mock_api()):
+            result = self._run(self._args(), input_text="y\n")
+        assert "chart-operator.giantswarm.io/paused" in result.output
+
+    def test_in_cluster_app_does_not_call_load_wc_client(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._mock_api()), \
+             patch("migrator.load_wc_client") as mock_load_wc:
+            self._run(self._args(), input_text="y\n")
+        mock_load_wc.assert_not_called()
+
+    def test_remote_cluster_app_calls_load_wc_client(self):
+        _app_remote = {
+            **_APP_DICT,
+            "spec": {
+                **_APP_DICT["spec"],
+                "kubeConfig": {
+                    "inCluster": False,
+                    "secret": {"name": "my-cluster-kubeconfig", "namespace": "giantswarm"},
+                },
+            },
+        }
+        mock_wc_api = MagicMock()
+        with patch("fetcher.fetch", return_value=(_app_remote, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._mock_api()), \
+             patch("migrator.core_client", return_value=MagicMock()), \
+             patch("migrator.load_wc_client", return_value=mock_wc_api) as mock_load_wc:
+            self._run(self._args(), input_text="y\n")
+        mock_load_wc.assert_called_once()
+
     def test_fetch_step_shows_catalog_type(self):
         with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
             result = self._run(self._args(), input_text="n\n")

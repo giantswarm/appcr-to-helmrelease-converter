@@ -2,7 +2,10 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from migrator import DisableFluxReconcileApp, MigrationRunner, MigratorError, SuspendApp, load_client
+from migrator import (
+    DisableFluxReconcileApp, MigrationRunner, MigratorError, SuspendApp, SuspendChart,
+    chart_cr_name, load_client, load_wc_client,
+)
 from kubernetes.client.exceptions import ApiException
 from kubernetes.config.config_exception import ConfigException
 
@@ -282,6 +285,15 @@ class TestSuspendApp:
         assert "app-operator.giantswarm.io/paused" in step.description
 
 
+class TestCoreClient:
+    def test_returns_core_v1_api(self):
+        from migrator import core_client
+        mock_api = MagicMock()
+        with patch("kubernetes.client.CoreV1Api", return_value=mock_api):
+            result = core_client()
+        assert result is mock_api
+
+
 class TestLoadClient:
     def test_returns_custom_objects_api(self):
         mock_api = MagicMock()
@@ -301,3 +313,171 @@ class TestLoadClient:
         with patch("kubernetes.config.load_kube_config", side_effect=ConfigException(msg)):
             with pytest.raises(MigratorError, match="Invalid kube-config"):
                 load_client("bad-context")
+
+
+class TestChartCRName:
+    def test_in_cluster_app_name_unchanged(self):
+        app = {"metadata": {"name": "my-app", "labels": {}}}
+        assert chart_cr_name(app) == "my-app"
+
+    def test_remote_cluster_strips_prefix(self):
+        app = {"metadata": {"name": "my-cluster-myapp", "labels": {"giantswarm.io/cluster": "my-cluster"}}}
+        assert chart_cr_name(app) == "myapp"
+
+    def test_remote_cluster_strips_suffix(self):
+        app = {"metadata": {"name": "myapp-my-cluster", "labels": {"giantswarm.io/cluster": "my-cluster"}}}
+        assert chart_cr_name(app) == "myapp"
+
+    def test_remote_cluster_strips_both_prefix_and_suffix(self):
+        app = {"metadata": {"name": "my-cluster-myapp-my-cluster", "labels": {"giantswarm.io/cluster": "my-cluster"}}}
+        assert chart_cr_name(app) == "myapp"
+
+    def test_no_labels_field_leaves_name_unchanged(self):
+        app = {"metadata": {"name": "my-app"}}
+        assert chart_cr_name(app) == "my-app"
+
+
+_APP_REMOTE = {
+    "metadata": {
+        "name": "my-cluster-myapp",
+        "namespace": "giantswarm",
+        "annotations": {},
+        "labels": {"giantswarm.io/cluster": "my-cluster"},
+    },
+    "spec": {
+        "kubeConfig": {"inCluster": False, "secret": {"name": "my-cluster-kubeconfig", "namespace": "giantswarm"}},
+    },
+}
+
+_APP_CHART_ALREADY_PAUSED = {
+    "metadata": {
+        "name": "my-app",
+        "namespace": "giantswarm",
+        "annotations": {"chart-operator.giantswarm.io/paused": "true"},
+        "labels": {},
+    },
+}
+
+
+class TestSuspendChart:
+    def test_description_contains_giantswarm_namespace_and_chart_name(self):
+        step = SuspendChart(MagicMock(), _APP)
+        assert "giantswarm/my-app" in step.description
+
+    def test_description_contains_paused_annotation(self):
+        step = SuspendChart(MagicMock(), _APP)
+        assert "chart-operator.giantswarm.io/paused" in step.description
+
+    def test_apply_patches_paused_annotation(self):
+        api = MagicMock()
+        step = SuspendChart(api, _APP)
+        step.apply()
+        api.patch_namespaced_custom_object.assert_called_once()
+        kwargs = api.patch_namespaced_custom_object.call_args.kwargs
+        assert kwargs["namespace"] == "giantswarm"
+        assert kwargs["name"] == "my-app"
+        assert kwargs["plural"] == "charts"
+        assert kwargs["body"]["metadata"]["annotations"]["chart-operator.giantswarm.io/paused"] == "true"
+
+    def test_apply_is_idempotent_when_already_paused(self):
+        api = MagicMock()
+        step = SuspendChart(api, _APP_CHART_ALREADY_PAUSED)
+        step.apply()
+        api.patch_namespaced_custom_object.assert_not_called()
+
+    def test_apply_records_did_pause_flag(self):
+        api = MagicMock()
+        step = SuspendChart(api, _APP)
+        step.apply()
+        assert step._did_pause is True
+
+    def test_apply_does_not_set_flag_when_already_paused(self):
+        api = MagicMock()
+        step = SuspendChart(api, _APP_CHART_ALREADY_PAUSED)
+        step.apply()
+        assert step._did_pause is False
+
+    def test_apply_raises_migrator_error_on_api_failure(self):
+        api = MagicMock()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
+        step = SuspendChart(api, _APP)
+        with pytest.raises(MigratorError, match="failed to patch Chart"):
+            step.apply()
+
+    def test_revert_removes_paused_annotation_when_apply_added_it(self):
+        api = MagicMock()
+        step = SuspendChart(api, _APP)
+        step.apply()
+        api.reset_mock()
+        step.revert()
+        body = api.patch_namespaced_custom_object.call_args.kwargs["body"]
+        assert body["metadata"]["annotations"]["chart-operator.giantswarm.io/paused"] is None
+
+    def test_revert_does_nothing_when_apply_changed_nothing(self):
+        api = MagicMock()
+        step = SuspendChart(api, _APP_CHART_ALREADY_PAUSED)
+        step.apply()
+        api.reset_mock()
+        step.revert()
+        api.patch_namespaced_custom_object.assert_not_called()
+
+    def test_revert_raises_migrator_error_on_api_failure(self):
+        api = MagicMock()
+        step = SuspendChart(api, _APP)
+        step.apply()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=500)
+        with pytest.raises(MigratorError, match="failed to patch Chart"):
+            step.revert()
+
+    def test_apply_uses_chart_name_derived_from_app_for_remote_cluster(self):
+        api = MagicMock()
+        step = SuspendChart(api, _APP_REMOTE)
+        step.apply()
+        kwargs = api.patch_namespaced_custom_object.call_args.kwargs
+        assert kwargs["name"] == "myapp"
+
+
+class TestLoadWCClient:
+    def _make_secret(self, value):
+        secret = MagicMock()
+        secret.data = {"value": value}
+        return secret
+
+    def test_returns_custom_objects_api_for_wc(self):
+        kubeconfig_yaml = b"apiVersion: v1\nclusters: []\ncontexts: []\ncurrent-context: ''\nkind: Config\nusers: []\n"
+        core_api = MagicMock()
+        core_api.read_namespaced_secret.return_value = self._make_secret(kubeconfig_yaml)
+        mock_wc_api = MagicMock()
+        with patch("kubernetes.config.load_kube_config_from_dict"), \
+             patch("kubernetes.client.Configuration"), \
+             patch("kubernetes.client.ApiClient"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=mock_wc_api):
+            result = load_wc_client(core_api, "my-cluster-kubeconfig", "giantswarm")
+        assert result is mock_wc_api
+
+    def test_fetches_secret_by_name_and_namespace(self):
+        kubeconfig_yaml = b"apiVersion: v1\nclusters: []\ncontexts: []\ncurrent-context: ''\nkind: Config\nusers: []\n"
+        core_api = MagicMock()
+        core_api.read_namespaced_secret.return_value = self._make_secret(kubeconfig_yaml)
+        with patch("kubernetes.config.load_kube_config_from_dict"), \
+             patch("kubernetes.client.Configuration"), \
+             patch("kubernetes.client.ApiClient"), \
+             patch("kubernetes.client.CustomObjectsApi"):
+            load_wc_client(core_api, "my-cluster-kubeconfig", "giantswarm")
+        core_api.read_namespaced_secret.assert_called_once_with(
+            name="my-cluster-kubeconfig", namespace="giantswarm"
+        )
+
+    def test_raises_migrator_error_on_secret_fetch_failure(self):
+        core_api = MagicMock()
+        core_api.read_namespaced_secret.side_effect = ApiException(status=403)
+        with pytest.raises(MigratorError, match="failed to fetch kubeconfig secret"):
+            load_wc_client(core_api, "my-cluster-kubeconfig", "giantswarm")
+
+    def test_raises_migrator_error_when_value_key_missing(self):
+        core_api = MagicMock()
+        secret = MagicMock()
+        secret.data = {}
+        core_api.read_namespaced_secret.return_value = secret
+        with pytest.raises(MigratorError, match="no 'value' key"):
+            load_wc_client(core_api, "my-cluster-kubeconfig", "giantswarm")

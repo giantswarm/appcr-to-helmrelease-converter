@@ -211,7 +211,19 @@ def migrate_cmd(name, namespace, context):
         raise SystemExit(1)
 
     runner = migrator.MigrationRunner()
-    steps = [migrator.DisableFluxReconcileApp(api, app), migrator.SuspendApp(api, app)]
+    kube = (app.get("spec") or {}).get("kubeConfig") or {}
+    if kube.get("inCluster") is False:
+        secret = kube.get("secret") or {}
+        secret_name = secret.get("name", "")
+        secret_ns = secret.get("namespace") or namespace
+        chart_api = migrator.load_wc_client(migrator.core_client(), secret_name, secret_ns)
+    else:
+        chart_api = api
+    steps = [
+        migrator.DisableFluxReconcileApp(api, app),
+        migrator.SuspendApp(api, app),
+        migrator.SuspendChart(chart_api, app),
+    ]
 
     for step in steps:
         try:

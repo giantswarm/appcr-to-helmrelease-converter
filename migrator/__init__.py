@@ -9,6 +9,9 @@ from kubernetes.config.config_exception import ConfigException
 _GROUP = "application.giantswarm.io"
 _VERSION = "v1alpha1"
 _PLURAL = "apps"
+_CHART_PLURAL = "charts"
+_CHART_PAUSED_ANNOTATION = "chart-operator.giantswarm.io/paused"
+_CLUSTER_LABEL = "giantswarm.io/cluster"
 
 _FLUX_NAME_LABEL = "kustomize.toolkit.fluxcd.io/name"
 _FLUX_NS_LABEL = "kustomize.toolkit.fluxcd.io/namespace"
@@ -62,6 +65,20 @@ def _api_message(e: ApiException) -> str:
         return e.reason or str(e.status)
 
 
+def chart_cr_name(app_dict: dict) -> str:
+    meta = app_dict.get("metadata", {})
+    name = meta.get("name", "")
+    cluster_id = (meta.get("labels") or {}).get(_CLUSTER_LABEL, "")
+    if cluster_id:
+        name = name.removeprefix(f"{cluster_id}-")
+        name = name.removesuffix(f"-{cluster_id}")
+    return name
+
+
+def core_client() -> client.CoreV1Api:
+    return client.CoreV1Api()
+
+
 def load_client(context: str | None) -> client.CustomObjectsApi:
     try:
         config.load_kube_config(context=context)
@@ -70,6 +87,26 @@ def load_client(context: str | None) -> client.CustomObjectsApi:
     return client.CustomObjectsApi()
 
 
+def load_wc_client(core_api: client.CoreV1Api, secret_name: str, secret_namespace: str) -> client.CustomObjectsApi:
+    try:
+        secret = core_api.read_namespaced_secret(name=secret_name, namespace=secret_namespace)
+    except ApiException as e:
+        raise MigratorError(
+            f"failed to fetch kubeconfig secret {secret_namespace}/{secret_name}: {_api_message(e)}"
+        ) from e
+    kubeconfig_bytes = (secret.data or {}).get("value")
+    if not kubeconfig_bytes:
+        raise MigratorError(
+            f"kubeconfig secret {secret_namespace}/{secret_name} has no 'value' key"
+        )
+    import yaml as _yaml
+    kubeconfig_dict = _yaml.safe_load(kubeconfig_bytes)
+    wc_conf = client.Configuration()
+    config.load_kube_config_from_dict(kubeconfig_dict, client_configuration=wc_conf)
+    return client.CustomObjectsApi(api_client=client.ApiClient(configuration=wc_conf))
+
+
 # Step classes — imported last so the partial module satisfies their `from . import` references
 from .disable_flux_reconcile_app import DisableFluxReconcileApp  # noqa: E402
 from .suspend_app import SuspendApp  # noqa: E402
+from .suspend_chart_cr import SuspendChart  # noqa: E402
