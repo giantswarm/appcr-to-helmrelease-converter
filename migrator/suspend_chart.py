@@ -27,7 +27,16 @@ class SuspendChart(MigrationStep):
         return f'Annotate Chart CR {_CHART_NAMESPACE}/{self._chart_name} with {_CHART_PAUSED_ANNOTATION}: "true"'
 
     def apply(self) -> None:
-        annotations = (self._app.get("metadata", {}).get("annotations") or {})
+        try:
+            chart = self._api.get_namespaced_custom_object(
+                group=_GROUP, version=_VERSION, namespace=_CHART_NAMESPACE, plural=_CHART_PLURAL,
+                name=self._chart_name,
+            )
+        except ApiException as e:
+            raise MigratorError(
+                f"failed to fetch Chart {_CHART_NAMESPACE}/{self._chart_name}: {_api_message(e)}"
+            ) from e
+        annotations = (chart.get("metadata", {}).get("annotations") or {})
         if annotations.get(_CHART_PAUSED_ANNOTATION) == "true":
             return
         self._did_pause = True
