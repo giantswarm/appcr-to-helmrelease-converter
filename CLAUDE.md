@@ -129,7 +129,7 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **9e. Monitor** _(not started)_ Watch HelmRelease status until ready or user aborts.
 
-**9f. Revert** _(not started)_ Full revert sequence: suspend HR → delete HR + source → resume Chart CR → resume App CR → remove `reconcile: disabled` label if added. Idempotent. Includes skip-revert + print manual steps path.
+**9f. Revert** ~~_(not started)_~~ _Obsolete: revert logic is now baked into each `MigrationStep.revert()` + `MigrationRunner.revert_all()` (LIFO). The skip-revert + print manual steps path belongs in the 9e Monitor step or `main.py` error handler. See ADR 0013._
 
 **9g. Success cleanup** _(not started)_ Flux-managed: print instructions to manually delete App CR + Chart CR. Non-Flux-managed: prompt and delete both.
 
