@@ -123,7 +123,7 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **9b. Suspend App CR** ✓ _Implemented: `DisableFluxReconcileApp` + `SuspendApp` steps in `migrator/` package. Detects Flux-managed App CR (`kustomize.toolkit.fluxcd.io/name` + `namespace` labels); adds `kustomize.toolkit.fluxcd.io/reconcile: disabled` if needed; adds `app-operator.giantswarm.io/paused` annotation. Idempotent. See commit 2bb096d._
 
-**9c. Suspend Chart CR** _(not started)_ Derive Chart CR name from `giantswarm.io/cluster` label on App CR; determine MC vs WC client; add `chart-operator.giantswarm.io/paused`. Two-client problem lives here. See CONTEXT.md for Chart CR name derivation rules.
+**9c. Suspend Chart CR** ✓ _Implemented: `SuspendChart` step in `migrator/suspend_chart.py`. Derives Chart CR name via `chart_cr_name()` (strips `giantswarm.io/cluster` prefix/suffix). GETs the Chart CR via the api to check current state (idempotent). Two-client problem solved in `main.py`: in-cluster apps reuse the MC `CustomObjectsApi`; remote-cluster apps use `load_wc_client()` which reads the kubeconfig Secret from MC via `CoreV1Api` and builds a separate WC `CustomObjectsApi`. `load_wc_client` errors handled cleanly (❌ + SystemExit)._
 
 **9d. Apply** _(not started)_ Apply HelmRelease + OCIRepository or HelmRepository to MC. Idempotent.
 
