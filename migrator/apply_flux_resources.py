@@ -2,6 +2,7 @@ import time
 
 from kubernetes import client
 from kubernetes.client.exceptions import ApiException
+from kubernetes.dynamic import DynamicClient
 
 from . import MigrationStep, MigratorError, _api_message
 
@@ -47,13 +48,12 @@ class ApplyFluxResources(MigrationStep):
         name = meta.get("name", "")
         namespace = meta.get("namespace", "")
         group, version, plural = self._gvp(kind)
+        path = f"/apis/{group}/{version}/namespaces/{namespace}/{plural}/{name}"
         try:
-            self._api.patch_namespaced_custom_object(
-                group=group, version=version, namespace=namespace, plural=plural,
-                name=name, body=doc,
-                field_manager=_FIELD_MANAGER, force=True,
-                _content_type="application/apply-patch+yaml",
-            )
+            dyn = DynamicClient(self._api.api_client)
+            dyn.request("patch", path, body=doc,
+                        field_manager=_FIELD_MANAGER, force_conflicts=True,
+                        content_type="application/apply-patch+yaml")
         except ApiException as e:
             raise MigratorError(f"failed to apply {kind} {namespace}/{name}: {_api_message(e)}") from e
 

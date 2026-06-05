@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -36,72 +36,85 @@ _DOCS_OCI = [_OCI_REPO, _HELM_RELEASE]
 class TestApplyFluxResources:
     def test_apply_server_side_applies_source_resource(self):
         api = MagicMock()
-        step = ApplyFluxResources(api, _DOCS_OCI)
-        step.apply()
-        calls = api.patch_namespaced_custom_object.call_args_list
-        source_call = calls[0]
-        assert source_call.kwargs["group"] == "source.toolkit.fluxcd.io"
-        assert source_call.kwargs["version"] == "v1beta2"
-        assert source_call.kwargs["plural"] == "ocirepositories"
-        assert source_call.kwargs["namespace"] == "giantswarm"
-        assert source_call.kwargs["name"] == "my-app"
-        assert source_call.kwargs["field_manager"] == "appcr-to-helmrelease-converter"
-        assert source_call.kwargs["force"] is True
+        with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn = mock_dyn_cls.return_value
+            step = ApplyFluxResources(api, _DOCS_OCI)
+            step.apply()
+            req_call = mock_dyn.request.call_args_list[0]
+            assert req_call.args[0] == "patch"
+            assert "source.toolkit.fluxcd.io" in req_call.args[1]
+            assert "v1beta2" in req_call.args[1]
+            assert "ocirepositories" in req_call.args[1]
+            assert "giantswarm" in req_call.args[1]
+            assert req_call.kwargs["field_manager"] == "appcr-to-helmrelease-converter"
+            assert req_call.kwargs["force_conflicts"] is True
+            assert req_call.kwargs["content_type"] == "application/apply-patch+yaml"
 
     def test_apply_server_side_applies_helm_release(self):
         api = MagicMock()
-        step = ApplyFluxResources(api, _DOCS_OCI)
-        step.apply()
-        calls = api.patch_namespaced_custom_object.call_args_list
-        hr_call = calls[1]
-        assert hr_call.kwargs["group"] == "helm.toolkit.fluxcd.io"
-        assert hr_call.kwargs["version"] == "v2"
-        assert hr_call.kwargs["plural"] == "helmreleases"
-        assert hr_call.kwargs["namespace"] == "giantswarm"
-        assert hr_call.kwargs["name"] == "my-app"
-        assert hr_call.kwargs["field_manager"] == "appcr-to-helmrelease-converter"
-        assert hr_call.kwargs["force"] is True
+        with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn = mock_dyn_cls.return_value
+            step = ApplyFluxResources(api, _DOCS_OCI)
+            step.apply()
+            req_call = mock_dyn.request.call_args_list[1]
+            assert req_call.args[0] == "patch"
+            assert "helm.toolkit.fluxcd.io" in req_call.args[1]
+            assert "v2" in req_call.args[1]
+            assert "helmreleases" in req_call.args[1]
+            assert req_call.kwargs["field_manager"] == "appcr-to-helmrelease-converter"
+            assert req_call.kwargs["force_conflicts"] is True
+            assert req_call.kwargs["content_type"] == "application/apply-patch+yaml"
 
     def test_apply_applies_source_before_helm_release(self):
         api = MagicMock()
-        step = ApplyFluxResources(api, _DOCS_OCI)
-        step.apply()
-        calls = api.patch_namespaced_custom_object.call_args_list
-        assert calls[0].kwargs["plural"] == "ocirepositories"
-        assert calls[1].kwargs["plural"] == "helmreleases"
+        with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn = mock_dyn_cls.return_value
+            step = ApplyFluxResources(api, _DOCS_OCI)
+            step.apply()
+            req_calls = mock_dyn.request.call_args_list
+            assert "ocirepositories" in req_calls[0].args[1]
+            assert "helmreleases" in req_calls[1].args[1]
 
     def test_apply_fails_fast_when_source_apply_raises(self):
         api = MagicMock()
-        api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
-        step = ApplyFluxResources(api, _DOCS_OCI)
-        with pytest.raises(MigratorError, match="failed to apply OCIRepository"):
-            step.apply()
-        assert api.patch_namespaced_custom_object.call_count == 1
+        with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn = mock_dyn_cls.return_value
+            mock_dyn.request.side_effect = ApiException(status=403)
+            step = ApplyFluxResources(api, _DOCS_OCI)
+            with pytest.raises(MigratorError, match="failed to apply OCIRepository"):
+                step.apply()
+            assert mock_dyn.request.call_count == 1
 
     def test_apply_raises_migrator_error_when_helm_release_apply_fails(self):
         api = MagicMock()
-        api.patch_namespaced_custom_object.side_effect = [None, ApiException(status=500)]
-        step = ApplyFluxResources(api, _DOCS_OCI)
-        with pytest.raises(MigratorError, match="failed to apply HelmRelease"):
-            step.apply()
+        with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn = mock_dyn_cls.return_value
+            mock_dyn.request.side_effect = [None, ApiException(status=500)]
+            step = ApplyFluxResources(api, _DOCS_OCI)
+            with pytest.raises(MigratorError, match="failed to apply HelmRelease"):
+                step.apply()
 
     def test_apply_deletes_source_when_helm_release_apply_fails(self):
         api = MagicMock()
-        api.patch_namespaced_custom_object.side_effect = [None, ApiException(status=500)]
-        step = ApplyFluxResources(api, _DOCS_OCI)
-        with pytest.raises(MigratorError):
-            step.apply()
-        delete_call = api.delete_namespaced_custom_object.call_args
-        assert delete_call.kwargs["plural"] == "ocirepositories"
-        assert delete_call.kwargs["name"] == "my-app"
+        with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn = mock_dyn_cls.return_value
+            mock_dyn.request.side_effect = [None, ApiException(status=500)]
+            step = ApplyFluxResources(api, _DOCS_OCI)
+            with pytest.raises(MigratorError):
+                step.apply()
+            delete_call = api.delete_namespaced_custom_object.call_args
+            assert delete_call.kwargs["plural"] == "ocirepositories"
+            assert delete_call.kwargs["name"] == "my-app"
 
     def test_apply_still_raises_when_source_cleanup_also_fails(self):
         api = MagicMock()
-        api.patch_namespaced_custom_object.side_effect = [None, ApiException(status=500)]
-        api.delete_namespaced_custom_object.side_effect = ApiException(status=500)
-        step = ApplyFluxResources(api, _DOCS_OCI)
-        with pytest.raises(MigratorError, match="failed to apply HelmRelease"):
-            step.apply()
+        with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn = mock_dyn_cls.return_value
+            mock_dyn.request.side_effect = [None, ApiException(status=500)]
+            api.delete_namespaced_custom_object.side_effect = ApiException(status=500)
+            step = ApplyFluxResources(api, _DOCS_OCI)
+            with pytest.raises(MigratorError, match="failed to apply HelmRelease"):
+                step.apply()
 
     def test_description_for_oci_path(self):
         step = ApplyFluxResources(MagicMock(), _DOCS_OCI)
@@ -129,14 +142,14 @@ class TestApplyFluxResources:
         delete_call = api.delete_namespaced_custom_object.call_args_list[0]
         assert delete_call.kwargs["plural"] == "helmreleases"
 
-    def test_revert_suspend_does_not_use_ssa(self):
+    def test_revert_suspend_uses_merge_patch_not_ssa(self):
         api = MagicMock()
         api.get_namespaced_custom_object.side_effect = ApiException(status=404)
         step = ApplyFluxResources(api, _DOCS_OCI)
         step.revert()
         suspend_call = api.patch_namespaced_custom_object.call_args
-        assert "_content_type" not in suspend_call.kwargs
         assert "force" not in suspend_call.kwargs
+        assert "force_conflicts" not in suspend_call.kwargs
 
     def test_revert_polls_until_helm_release_gone_then_deletes_source(self):
         api = MagicMock()

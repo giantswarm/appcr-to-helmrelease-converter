@@ -413,7 +413,8 @@ class TestMigrateCommand:
 
     def test_confirms_exits_zero(self):
         with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
-             patch("migrator.load_client", return_value=self._mock_api()):
+             patch("migrator.load_client", return_value=self._mock_api()), \
+             patch("migrator.apply_flux_resources.DynamicClient"):
             result = self._run(self._args(), input_text="y\n")
         assert result.exit_code == 0
 
@@ -590,31 +591,29 @@ class TestMigrateCommand:
     def _apply_failing_api(self):
         api = MagicMock()
         api.get_namespaced_custom_object.return_value = {}  # SuspendChart GET
-        apply_calls = {"count": 0}
-
-        def patch_side_effect(*args, **kwargs):
-            apply_calls["count"] += 1
-            if apply_calls["count"] >= 3:  # suspend steps use 2 patches; apply uses 3rd+
-                raise ApiException(status=500)
-
-        api.patch_namespaced_custom_object.side_effect = patch_side_effect
         return api
 
     def test_apply_step_failure_exits_nonzero(self):
         with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
-             patch("migrator.load_client", return_value=self._apply_failing_api()):
+             patch("migrator.load_client", return_value=self._apply_failing_api()), \
+             patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn_cls.return_value.request.side_effect = ApiException(status=500)
             result = self._run(self._args(), input_text="y\ny\n")
         assert result.exit_code != 0
 
     def test_apply_step_failure_asks_to_revert(self):
         with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
-             patch("migrator.load_client", return_value=self._apply_failing_api()):
+             patch("migrator.load_client", return_value=self._apply_failing_api()), \
+             patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn_cls.return_value.request.side_effect = ApiException(status=500)
             result = self._run(self._args(), input_text="y\ny\n")
         assert "Revert changes?" in result.output
 
     def test_apply_step_failure_skips_revert_when_declined(self):
         with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
-             patch("migrator.load_client", return_value=self._apply_failing_api()):
+             patch("migrator.load_client", return_value=self._apply_failing_api()), \
+             patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn_cls.return_value.request.side_effect = ApiException(status=500)
             result = self._run(self._args(), input_text="y\nn\n")
         assert "Skipping revert" in result.output
 
