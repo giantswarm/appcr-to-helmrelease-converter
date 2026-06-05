@@ -587,6 +587,37 @@ class TestMigrateCommand:
             result = self._run(self._args(), input_text="n\n")
         assert "warning" in result.output.lower()
 
+    def _apply_failing_api(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = {}  # SuspendChart GET
+        apply_calls = {"count": 0}
+
+        def patch_side_effect(*args, **kwargs):
+            apply_calls["count"] += 1
+            if apply_calls["count"] >= 3:  # suspend steps use 2 patches; apply uses 3rd+
+                raise ApiException(status=500)
+
+        api.patch_namespaced_custom_object.side_effect = patch_side_effect
+        return api
+
+    def test_apply_step_failure_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._apply_failing_api()):
+            result = self._run(self._args(), input_text="y\ny\n")
+        assert result.exit_code != 0
+
+    def test_apply_step_failure_asks_to_revert(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._apply_failing_api()):
+            result = self._run(self._args(), input_text="y\ny\n")
+        assert "Revert changes?" in result.output
+
+    def test_apply_step_failure_skips_revert_when_declined(self):
+        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+             patch("migrator.load_client", return_value=self._apply_failing_api()):
+            result = self._run(self._args(), input_text="y\nn\n")
+        assert "Skipping revert" in result.output
+
 
 class TestStripServerFields:
     def setup_method(self):

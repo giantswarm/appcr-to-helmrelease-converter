@@ -125,7 +125,7 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **9c. Suspend Chart CR** ✓ _Implemented: `SuspendChart` step in `migrator/suspend_chart.py`. Derives Chart CR name via `chart_cr_name()` (strips `giantswarm.io/cluster` prefix/suffix). GETs the Chart CR via the api to check current state (idempotent). Two-client problem solved in `main.py`: in-cluster apps reuse the MC `CustomObjectsApi`; remote-cluster apps use `load_wc_client()` which reads the kubeconfig Secret from MC via `CoreV1Api` and builds a separate WC `CustomObjectsApi`. `load_wc_client` errors handled cleanly (❌ + SystemExit)._
 
-**9d. Apply** _(not started)_ Apply HelmRelease + OCIRepository or HelmRepository to MC. Idempotent.
+**9d. Apply** ✓ _Implemented: `ApplyFluxResources` step in `migrator/apply_flux_resources.py`. Server-side applies source resource (OCIRepository or HelmRepository) then HelmRelease to MC. On partial failure (source applied, HR fails), best-effort deletes source before re-raising so it doesn't leak. Revert suspends HR via merge-patch, deletes it, polls until finalizer clears (5s interval, 5min timeout), then deletes source only once HR is confirmed gone. Wired as the fourth step in the shared migration step loop in `main.py`._
 
 **9e. Monitor** _(not started)_ Watch HelmRelease status until ready or user aborts.
 

@@ -227,6 +227,7 @@ def migrate_cmd(name, namespace, context):
         migrator.DisableFluxReconcileApp(api, app),
         migrator.SuspendApp(api, app),
         migrator.SuspendChart(chart_api, app),
+        migrator.ApplyFluxResources(api, docs),
     ]
 
     for step in steps:
