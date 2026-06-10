@@ -71,6 +71,9 @@ def _build_helm_repository(app: dict, catalog: dict) -> OrderedDict:
     ])
 
 
+_SERVICE_ACCOUNT_EXCLUDED_NAMESPACES = {"giantswarm", "flux-giantswarm", "monitoring"}
+
+
 _ANNOTATION_BLOCKLIST = {
     "chart-operator.giantswarm.io/force-helm-upgrade",
     "app-operator.giantswarm.io/paused",
@@ -126,12 +129,15 @@ def _build_helm_release_common(app: dict) -> OrderedDict:
         hr["metadata"]["labels"] = labels
 
     kube_config = app["spec"].get("kubeConfig", {})
-    if kube_config and not kube_config.get("inCluster"):
+    is_remote = kube_config and not kube_config.get("inCluster")
+    if is_remote:
         hr["spec"]["kubeConfig"] = OrderedDict([
             ("secretRef", OrderedDict([
                 ("name", kube_config["secret"]["name"]),
             ]))
         ])
+    elif app["spec"]["namespace"] not in _SERVICE_ACCOUNT_EXCLUDED_NAMESPACES:
+        hr["spec"]["serviceAccountName"] = "automation"
 
     values_from = calculate_values_from(app)
     if values_from:

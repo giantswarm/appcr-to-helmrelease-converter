@@ -142,6 +142,28 @@ class TestBuildHelmRelease:
         }))
         assert result["spec"]["kubeConfig"]["secretRef"]["name"] == "example-kubeconfig"
 
+    def test_service_account_name_set_for_org_namespace(self):
+        assert build_helm_release(_app(spec_namespace="org-acme"))["spec"]["serviceAccountName"] == "automation"
+
+    def test_no_service_account_name_for_giantswarm_namespace(self):
+        assert "serviceAccountName" not in build_helm_release(_app(spec_namespace="giantswarm"))["spec"]
+
+    def test_no_service_account_name_for_flux_giantswarm_namespace(self):
+        assert "serviceAccountName" not in build_helm_release(_app(spec_namespace="flux-giantswarm"))["spec"]
+
+    def test_no_service_account_name_for_monitoring_namespace(self):
+        assert "serviceAccountName" not in build_helm_release(_app(spec_namespace="monitoring"))["spec"]
+
+    def test_no_service_account_name_for_remote_cluster_in_org_namespace(self):
+        app = _app(spec_namespace="org-acme", spec_extra={
+            "kubeConfig": {"inCluster": False, "secret": {"name": "my-wc-kubeconfig"}},
+        })
+        assert "serviceAccountName" not in build_helm_release(app)["spec"]
+
+    def test_service_account_name_set_when_in_cluster_true_in_org_namespace(self):
+        app = _app(spec_namespace="org-acme", spec_extra={"kubeConfig": {"inCluster": True}})
+        assert build_helm_release(app)["spec"]["serviceAccountName"] == "automation"
+
     def test_no_values_from_when_no_config(self):
         assert "valuesFrom" not in build_helm_release(_app())["spec"]
 
