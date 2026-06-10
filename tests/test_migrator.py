@@ -1,3 +1,4 @@
+import base64
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -473,7 +474,7 @@ class TestLoadWCClient:
     def test_returns_custom_objects_api_for_wc(self):
         kubeconfig_yaml = b"apiVersion: v1\nclusters: []\ncontexts: []\ncurrent-context: ''\nkind: Config\nusers: []\n"
         core_api = MagicMock()
-        core_api.read_namespaced_secret.return_value = self._make_secret(kubeconfig_yaml)
+        core_api.read_namespaced_secret.return_value = self._make_secret(base64.b64encode(kubeconfig_yaml).decode())
         mock_wc_api = MagicMock()
         with patch("kubernetes.config.load_kube_config_from_dict"), \
              patch("kubernetes.client.Configuration"), \
@@ -485,7 +486,7 @@ class TestLoadWCClient:
     def test_fetches_secret_by_name_and_namespace(self):
         kubeconfig_yaml = b"apiVersion: v1\nclusters: []\ncontexts: []\ncurrent-context: ''\nkind: Config\nusers: []\n"
         core_api = MagicMock()
-        core_api.read_namespaced_secret.return_value = self._make_secret(kubeconfig_yaml)
+        core_api.read_namespaced_secret.return_value = self._make_secret(base64.b64encode(kubeconfig_yaml).decode())
         with patch("kubernetes.config.load_kube_config_from_dict"), \
              patch("kubernetes.client.Configuration"), \
              patch("kubernetes.client.ApiClient"), \

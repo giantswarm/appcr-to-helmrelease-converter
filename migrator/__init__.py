@@ -103,8 +103,9 @@ def load_wc_client(core_api: client.CoreV1Api, secret_name: str, secret_namespac
         raise MigratorError(
             f"kubeconfig secret {secret_namespace}/{secret_name} has no 'value' key"
         )
+    import base64 as _base64
     import yaml as _yaml
-    kubeconfig_dict = _yaml.safe_load(kubeconfig_bytes)
+    kubeconfig_dict = _yaml.safe_load(_base64.b64decode(kubeconfig_bytes))
     wc_conf = client.Configuration()
     config.load_kube_config_from_dict(kubeconfig_dict, client_configuration=wc_conf)
     return client.CustomObjectsApi(api_client=client.ApiClient(configuration=wc_conf))
