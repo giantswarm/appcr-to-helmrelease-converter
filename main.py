@@ -211,6 +211,7 @@ def migrate_cmd(name, namespace, context):
         raise SystemExit(1)
 
     runner = migrator.MigrationRunner()
+    console = Console(file=sys.stdout, highlight=False)
     kube = (app.get("spec") or {}).get("kubeConfig") or {}
     if kube.get("inCluster") is False:
         secret = kube.get("secret") or {}
@@ -228,6 +229,7 @@ def migrate_cmd(name, namespace, context):
         migrator.SuspendApp(api, app),
         migrator.SuspendChart(chart_api, app),
         migrator.ApplyFluxResources(api, docs),
+        migrator.MonitorHelmRelease(api, docs[1], console=console),
     ]
 
     for step in steps:

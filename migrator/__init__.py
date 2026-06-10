@@ -10,6 +10,10 @@ _GROUP = "application.giantswarm.io"
 _VERSION = "v1alpha1"
 _PLURAL = "apps"
 _CHART_PLURAL = "charts"
+
+_HR_GROUP = "helm.toolkit.fluxcd.io"
+_HR_VERSION = "v2"
+_HR_PLURAL = "helmreleases"
 _CHART_PAUSED_ANNOTATION = "chart-operator.giantswarm.io/paused"
 _CLUSTER_LABEL = "giantswarm.io/cluster"
 
@@ -109,5 +113,6 @@ def load_wc_client(core_api: client.CoreV1Api, secret_name: str, secret_namespac
 # Step classes — imported last so the partial module satisfies their `from . import` references
 from .apply_flux_resources import ApplyFluxResources  # noqa: E402
 from .disable_flux_reconcile_app import DisableFluxReconcileApp  # noqa: E402
+from .monitor_helm_release import MonitorHelmRelease  # noqa: E402
 from .suspend_app import SuspendApp  # noqa: E402
 from .suspend_chart import SuspendChart  # noqa: E402

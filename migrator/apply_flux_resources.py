@@ -4,7 +4,7 @@ from kubernetes import client
 from kubernetes.client.exceptions import ApiException
 from kubernetes.dynamic import DynamicClient
 
-from . import MigrationStep, MigratorError, _api_message
+from . import MigrationStep, MigratorError, _api_message, _HR_GROUP, _HR_VERSION, _HR_PLURAL
 
 
 _POLL_INTERVAL_S = 5
@@ -14,9 +14,6 @@ _SOURCE_META = {
     "OCIRepository": ("source.toolkit.fluxcd.io", "v1beta2", "ocirepositories"),
     "HelmRepository": ("source.toolkit.fluxcd.io", "v1", "helmrepositories"),
 }
-_HR_GROUP = "helm.toolkit.fluxcd.io"
-_HR_VERSION = "v2"
-_HR_PLURAL = "helmreleases"
 _FIELD_MANAGER = "appcr-to-helmrelease-converter"
 
 

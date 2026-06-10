@@ -412,9 +412,14 @@ class TestMigrateCommand:
         return MagicMock()
 
     def test_confirms_exits_zero(self):
+        mock_api = self._mock_api()
+        mock_api.get_namespaced_custom_object.return_value = {
+            "status": {"conditions": [{"type": "Ready", "status": "True", "reason": "InstallSucceeded"}]},
+        }
         with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
-             patch("migrator.load_client", return_value=self._mock_api()), \
-             patch("migrator.apply_flux_resources.DynamicClient"):
+             patch("migrator.load_client", return_value=mock_api), \
+             patch("migrator.apply_flux_resources.DynamicClient"), \
+             patch("migrator.monitor_helm_release.time.sleep"):
             result = self._run(self._args(), input_text="y\n")
         assert result.exit_code == 0
 

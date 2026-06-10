@@ -127,7 +127,7 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **9d. Apply** ✓ _Implemented: `ApplyFluxResources` step in `migrator/apply_flux_resources.py`. Server-side applies source resource (OCIRepository or HelmRepository) then HelmRelease to MC. On partial failure (source applied, HR fails), best-effort deletes source before re-raising so it doesn't leak. Revert suspends HR via merge-patch, deletes it, polls until finalizer clears (5s interval, 5min timeout), then deletes source only once HR is confirmed gone. Wired as the fourth step in the shared migration step loop in `main.py`._
 
-**9e. Monitor** _(not started)_ Watch HelmRelease status until ready or user aborts.
+**9e. Monitor** ✓ _Implemented (not live-tested): `MonitorHelmRelease` step in `migrator/monitor_helm_release.py`. Polls HelmRelease every 5s; returns on `Ready=True`; fails fast on `Stalled=True` (retries exhausted); retries up to 3× on transient API errors but raises immediately on 4xx; converts `KeyboardInterrupt` to `MigratorError` so LIFO revert fires. Rich `console.status()` spinner shows synthesized progress (attempt count, failure reason, retry indicator). Wired as 5th step in `main.py`. `_HR_GROUP/_HR_VERSION/_HR_PLURAL` consolidated into `migrator/__init__.py`._
 
 **9f. Revert** ~~_(not started)_~~ _Obsolete: revert logic is now baked into each `MigrationStep.revert()` + `MigrationRunner.revert_all()` (LIFO). The skip-revert + print manual steps path belongs in the 9e Monitor step or `main.py` error handler. See ADR 0013._
 
