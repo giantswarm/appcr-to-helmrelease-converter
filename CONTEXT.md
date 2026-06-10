@@ -54,13 +54,13 @@ _Avoid_: Helm repo source, chart repository resource
 The act of pulling an App CR and its Catalog CR from the MC by name and namespace, using the Kubernetes API. The Catalog CR name is taken from `spec.catalog`. The namespace is resolved as follows: if `spec.catalogNamespace` is set, only that namespace is checked; otherwise `default` is tried first, then `giantswarm`, using the first namespace where the Catalog CR is found (mirroring app-operator behaviour). A non-404 error during the fallback fails immediately. Hard error if the catalog is not found in any checked namespace. Always produces two dicts: the App CR and the Catalog CR. Implemented in the `fetcher/` package.
 _Avoid_: lookup, resolve, cluster fetch
 
-**`fetch` command**:
-The CLI command that runs a Fetch and emits the result as a two-document YAML stream (Catalog CR first, App CR second). Takes `--name`, `--namespace`, and optional `--context`. Server-side metadata fields (`uid`, `resourceVersion`, `generation`, `creationTimestamp`, `selfLink`, `managedFields`) and the `kubectl.kubernetes.io/last-applied-configuration` annotation are stripped before output; all other fields are preserved. Designed to be pipeable into `convert`.
-_Avoid_: fetch command (without backticks in prose)
+**Resolution**:
+The output of the Resolver step — a dataclass carrying decisions made through interactive cluster lookup that inform the Conversion. Today it carries `key_overrides`: a mapping of `(kind, name)` pairs to the resolved `valuesKey` string (or the Flux default `values.yaml` when the field should be omitted). Designed as an extension point: future interactive decisions add fields here without changing the Conversion interface.
+_Avoid_: resolved config, lookup result
 
-**`fetch-and-convert` command**:
-The CLI command that performs a Fetch and a Conversion in a single step. Takes `--name`, `--namespace`, and optional `--context`. Calls `fetcher.fetch()` and passes both dicts directly to the converter — no YAML serialisation or stripping in between. Runs the same preflight checks as `convert`: multiple-helm-repo warning (non-fatal), preflight warnings (non-fatal), preflight errors (fatal, exits nonzero). Emits Flux YAML to stdout. The in-memory path from cluster to Flux YAML — `fetch` + `convert` without a pipe.
-_Avoid_: fetch-and-convert command (without backticks in prose)
+**Resolver**:
+The step between preflight and Conversion that looks up every ConfigMap and Secret referenced in the App CR's `valuesFrom` sources from the MC, determines the correct `valuesKey` for each, and prompts the user when a resource has multiple data keys. Produces a [[Resolution]]. A missing ConfigMap or Secret is a hard error (the app platform guarantees these exist for any running app). Runs only in the `migrate` command — offline conversion is not supported.
+_Avoid_: lookup step, key resolver
 
 **app-operator**:
 The Giant Swarm operator that watches App CRs and translates them into Chart CRs. Resolves Catalog CRs, handles `kubeConfig` routing to remote clusters, and fans out `extraConfigs`/`config`/`userConfig` into a flat Chart CR.
@@ -112,8 +112,8 @@ Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR b
 - A **live migration** wraps a **conversion**: suspension → apply converted resources → monitor
 - **app-operator** translates an **App CR** into a **Chart CR** by resolving the **Catalog CR**; **chart-operator** reconciles the **Chart CR** into a Helm release
 - `spec.catalog` on an **App CR** is the name of a **Catalog CR** on the MC; the **Catalog CR**'s `spec.repositories[].type` (`oci` or `helm`) determines which Flux source resource the **Conversion** produces
-- A **Fetch** pulls an **App CR** and its **Catalog CR** from the MC and hands both dicts to a **Conversion**
-- The **`fetch-and-convert` command** combines a **Fetch** and a **Conversion** in memory — equivalent to `fetch | convert` without the YAML serialisation step
+- A **Fetch** pulls an **App CR** and its **Catalog CR** from the MC and hands both dicts to the **Resolver** and then the **Conversion**
+- The **Resolver** inspects the live ConfigMaps and Secrets referenced by the **App CR** and produces a **Resolution** that drives `valuesKey` decisions in the **Conversion**
 - A **remote-cluster app** carries a kubeconfig Secret reference on both the **App CR** (`spec.kubeConfig.secret.name`) and the converted **HelmRelease** (`spec.kubeConfig.secretRef.name`)
 
 ## Example dialogue
@@ -121,8 +121,8 @@ Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR b
 > **Dev:** "Should we call it a migration or a conversion?"
 > **Domain expert:** "Conversion is just the YAML translation. Migration is the full live operation — suspend, apply, monitor. Keep them separate."
 
-> **Dev:** "Why does the valuesKey differ from what the App platform docs say?"
-> **Domain expert:** "When you migrate, the ConfigMaps and Secrets get renamed following the GiantSwarm Flux convention. The new key names are `configmap-values.yaml` and `secret-values.yaml`, not `.data.values`."
+> **Dev:** "How does the tool know which key inside a ConfigMap holds the Helm values?"
+> **Domain expert:** "The Resolver looks up the live ConfigMap from the cluster. If there's one key, it uses that. If there are multiple, it asks the user. If the key is `values.yaml` (the Flux default), it omits the `valuesKey` field entirely. Hardcoded convention names like `configmap-values.yaml` are only a test-time fallback."
 
 ## Scope decisions
 

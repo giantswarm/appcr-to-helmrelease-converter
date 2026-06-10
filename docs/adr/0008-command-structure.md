@@ -4,7 +4,7 @@ Date: 2026-05-20
 
 ## Status
 
-Accepted. `fetch`, `convert`, and `fetch-and-convert` are implemented. `migrate` is reserved but not yet implemented.
+Superseded by ADR 0015. `fetch`, `convert`, and `fetch-and-convert` have been removed; only `migrate` remains.
 
 ## Context
 

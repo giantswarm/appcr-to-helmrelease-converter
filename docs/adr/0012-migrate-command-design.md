@@ -21,21 +21,22 @@ cleanup behaviour. Each phase will be detailed in its own session and ADR.
 ### Phase sequence
 
 ```
-fetch → preflight → convert → confirm → suspend → apply → monitor → (success | revert)
+fetch → preflight → resolve → convert → confirm → suspend → apply → monitor → (success | revert)
 ```
 
-1. **Fetch**: reuse `fetcher.fetch()` — same as `fetch-and-convert`.
-2. **Preflight**: reuse `run_preflight()` — same as `fetch-and-convert`. Errors exit nonzero; warnings print and continue.
-3. **Convert**: reuse `converter.convert()` — produces the Flux YAML.
-4. **Confirm**: print the converted Flux YAML and prompt the user. Proceeding past this point triggers live mutations.
-5. **Suspend**:
+1. **Fetch**: reuse `fetcher.fetch()`.
+2. **Preflight**: reuse `run_preflight()`. Errors exit nonzero; warnings print and continue.
+3. **Resolve**: run the `resolver/` package — look up each referenced ConfigMap and Secret from the MC, prompt the user when a resource has multiple keys, produce a `Resolution`. Missing resource → preflight error. See ADR 0016.
+4. **Convert**: reuse `converter.convert()` with the `Resolution` — produces the Flux YAML.
+5. **Confirm**: print the converted Flux YAML and prompt the user. Proceeding past this point triggers live mutations.
+6. **Suspend**:
    a. If the App CR is Flux-managed (carries `kustomize.toolkit.fluxcd.io/name` + `kustomize.toolkit.fluxcd.io/namespace` labels), add `kustomize.toolkit.fluxcd.io/reconcile: disabled` to prevent Flux from undoing subsequent patches.
    b. Suspend the App CR (`app-operator.giantswarm.io/paused` annotation).
    c. Suspend the Chart CR (`chart-operator.giantswarm.io/paused` annotation). The Chart CR lives in the `giantswarm` namespace on the MC (in-cluster app) or the WC (remote-cluster app); the client used depends on where the Chart CR lives.
-6. **Apply**: apply the HelmRelease and OCIRepository or HelmRepository to the MC.
-7. **Monitor**: watch the HelmRelease until it is ready or the user aborts.
-8. **Success path**: see "Success cleanup" below.
-9. **Revert path**: see "Revert" below.
+7. **Apply**: apply the HelmRelease and OCIRepository or HelmRepository to the MC.
+8. **Monitor**: watch the HelmRelease until it is ready or the user aborts.
+9. **Success path**: see "Success cleanup" below.
+10. **Revert path**: see "Revert" below.
 
 ### Idempotency
 

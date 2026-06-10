@@ -4,7 +4,7 @@ Date: 2026-05-21
 
 ## Status
 
-Accepted
+Superseded by ADR 0015. The `convert` command has been removed.
 
 ## Context
 
