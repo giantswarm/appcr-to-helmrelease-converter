@@ -2,6 +2,17 @@ from collections import OrderedDict
 
 from converter.values_from import calculate_values_from
 
+_CLUSTER_LABEL = "giantswarm.io/cluster"
+
+
+def _release_name(app: dict) -> str:
+    name = app["metadata"]["name"]
+    cluster_id = (app["metadata"].get("labels") or {}).get(_CLUSTER_LABEL, "")
+    if cluster_id:
+        name = name.removeprefix(f"{cluster_id}-")
+        name = name.removesuffix(f"-{cluster_id}")
+    return name
+
 
 def _oci_url_from_catalog(catalog: dict) -> str:
     for repo in (catalog.get("spec") or {}).get("repositories") or []:
@@ -100,7 +111,7 @@ def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
                 ]))
             ])),
             ("interval", "5m"),
-            ("releaseName", app["metadata"]["name"]),
+            ("releaseName", _release_name(app)),
             ("storageNamespace", app["spec"]["namespace"]),
             ("targetNamespace", app["spec"]["namespace"]),
             ("timeout", "10m"),

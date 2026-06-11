@@ -40,6 +40,17 @@ class TestBuildHelmRelease:
     def test_release_name_from_metadata_name(self):
         assert build_helm_release(_app(name="my-app"))["spec"]["releaseName"] == "my-app"
 
+    def test_release_name_strips_cluster_prefix(self):
+        app = _app(name="mycluster-my-app", labels={"giantswarm.io/cluster": "mycluster"})
+        assert build_helm_release(app)["spec"]["releaseName"] == "my-app"
+
+    def test_release_name_strips_cluster_suffix(self):
+        app = _app(name="my-app-mycluster", labels={"giantswarm.io/cluster": "mycluster"})
+        assert build_helm_release(app)["spec"]["releaseName"] == "my-app"
+
+    def test_release_name_no_cluster_label_unchanged(self):
+        assert build_helm_release(_app(name="mycluster-my-app"))["spec"]["releaseName"] == "mycluster-my-app"
+
     def test_target_namespace_from_spec_namespace(self):
         assert build_helm_release(_app(spec_namespace="monitoring"))["spec"]["targetNamespace"] == "monitoring"
 
