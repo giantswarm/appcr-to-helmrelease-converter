@@ -4,9 +4,17 @@ import yaml
 from click.testing import CliRunner
 from kubernetes.client.exceptions import ApiException
 
-from fetcher import FetchError
+from fetcher import FetchError, FetchResult
 from migrator import MigratorError
 from main import cli
+
+
+def _fetch_result(app=None, catalog=None, referenced_configs=None):
+    return FetchResult(
+        app=app or _APP_DICT,
+        catalog=catalog or _CATALOG_DICT,
+        referenced_configs=referenced_configs or {},
+    )
 
 
 _APP_DICT = {
@@ -91,27 +99,27 @@ class TestMigrateCommand:
         assert "❌" in result.output
 
     def test_preflight_error_exits_nonzero(self):
-        with patch("fetcher.fetch", return_value=(_APP_WITH_KUBECONFIG_MISMATCH, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result(app=_APP_WITH_KUBECONFIG_MISMATCH)):
             result = self._run(self._args())
         assert result.exit_code != 0
 
     def test_preflight_warning_continues(self):
-        with patch("fetcher.fetch", return_value=(_APP_WITH_NAMESPACE_CONFIG, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result(app=_APP_WITH_NAMESPACE_CONFIG)):
             result = self._run(self._args(), input_text="n\n")
         assert "⚠️" in result.output
 
     def test_flux_yaml_printed_to_stdout(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
             result = self._run(self._args(), input_text="n\n")
         assert "---" in result.output
 
     def test_flux_yaml_contains_helm_release(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
             result = self._run(self._args(), input_text="n\n")
         assert "kind: HelmRelease" in result.output
 
     def test_user_declines_exits_zero(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
             result = self._run(self._args(), input_text="n\n")
         assert result.exit_code == 0
 
@@ -123,7 +131,7 @@ class TestMigrateCommand:
         mock_api.get_namespaced_custom_object.return_value = {
             "status": {"conditions": [{"type": "Ready", "status": "True", "reason": "InstallSucceeded"}]},
         }
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=mock_api), \
              patch("migrator.apply_flux_resources.DynamicClient"), \
              patch("migrator.monitor_helm_release.time.sleep"):
@@ -131,33 +139,33 @@ class TestMigrateCommand:
         assert result.exit_code == 0
 
     def test_suspend_section_shown(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=self._mock_api()):
             result = self._run(self._args(), input_text="y\n")
         assert "Suspend giantswarm/my-app" in result.output
 
     def test_step_description_shown_with_checkmark_on_success(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=self._mock_api()):
             result = self._run(self._args(), input_text="y\n")
         assert "✅" in result.output
         assert "app-operator.giantswarm.io/paused" in result.output
 
     def test_skipped_flux_step_shows_info_message(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=self._mock_api()):
             result = self._run(self._args(), input_text="y\n")
         assert "kustomize.toolkit.fluxcd.io/name" in result.output
         assert "not detected" in result.output
 
     def test_load_client_error_exits_nonzero(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", side_effect=MigratorError("bad context")):
             result = self._run(self._args(), input_text="y\n")
         assert result.exit_code != 0
 
     def test_load_client_error_message_printed(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", side_effect=MigratorError("bad context")):
             result = self._run(self._args(), input_text="y\n")
         assert "bad context" in result.output
@@ -165,7 +173,7 @@ class TestMigrateCommand:
     def test_step_failure_exits_nonzero(self):
         api = MagicMock()
         api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=api):
             result = self._run(self._args(), input_text="y\ny\n")
         assert result.exit_code != 0
@@ -173,7 +181,7 @@ class TestMigrateCommand:
     def test_step_failure_message_printed(self):
         api = MagicMock()
         api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=api):
             result = self._run(self._args(), input_text="y\ny\n")
         assert "failed to patch App" in result.output
@@ -181,7 +189,7 @@ class TestMigrateCommand:
     def test_step_failure_asks_to_revert(self):
         api = MagicMock()
         api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=api):
             result = self._run(self._args(), input_text="y\ny\n")
         assert "Revert changes?" in result.output
@@ -189,7 +197,7 @@ class TestMigrateCommand:
     def test_step_failure_reverts_when_confirmed(self):
         api = MagicMock()
         api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=api):
             result = self._run(self._args(), input_text="y\ny\n")
         assert "Reverting" in result.output
@@ -197,7 +205,7 @@ class TestMigrateCommand:
     def test_step_failure_skips_revert_when_declined(self):
         api = MagicMock()
         api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=api):
             result = self._run(self._args(), input_text="y\nn\n")
         assert "Skipping revert" in result.output
@@ -205,55 +213,65 @@ class TestMigrateCommand:
     def test_revert_failure_message_printed(self):
         api = MagicMock()
         api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=api), \
              patch("migrator.MigrationRunner.revert_all", side_effect=MigratorError("revert boom")):
             result = self._run(self._args(), input_text="y\ny\n")
         assert "revert failed" in result.output
 
     def test_context_forwarded_to_fetcher(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)) as mock_fetch:
+        with patch("fetcher.fetch", return_value=_fetch_result()) as mock_fetch:
             self._run(self._args() + ["--context", "my-context"], input_text="n\n")
         mock_fetch.assert_called_once_with("my-app", "giantswarm", "my-context")
 
     def test_no_context_passes_none_to_fetcher(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)) as mock_fetch:
+        with patch("fetcher.fetch", return_value=_fetch_result()) as mock_fetch:
             self._run(self._args(), input_text="n\n")
         mock_fetch.assert_called_once_with("my-app", "giantswarm", None)
 
     def test_section_headers_appear_in_output(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
             result = self._run(self._args(), input_text="n\n")
         assert "Fetch" in result.output
         assert "Preflight" in result.output
+        assert "Resolve" in result.output
         assert "Generated Flux resources" in result.output
         assert "Confirm" in result.output
 
+    def test_resolve_section_shows_auto_resolved_key(self):
+        refs = {("ConfigMap", "my-cm", "giantswarm"): {"data": {"configmap-values.yaml": "x"}}}
+        app = {**_APP_DICT, "spec": {**_APP_DICT["spec"],
+               "config": {"configMap": {"name": "my-cm", "namespace": "giantswarm"}}}}
+        with patch("fetcher.fetch", return_value=_fetch_result(app=app, referenced_configs=refs)):
+            result = self._run(self._args(), input_text="n\n")
+        assert "my-cm" in result.output
+        assert "configmap-values.yaml" in result.output
+
     def test_fetch_step_shows_app_name_and_version(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
             result = self._run(self._args(), input_text="n\n")
         assert "my-app" in result.output
         assert "1.2.3" in result.output
 
     def test_fetch_step_displays_app_cr_yaml(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
             result = self._run(self._args(), input_text="n\n")
         assert "kind: App" in result.output
 
     def test_fetch_step_strips_server_fields_from_app_cr(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT_WITH_SERVER_FIELDS, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result(app=_APP_DICT_WITH_SERVER_FIELDS)):
             result = self._run(self._args(), input_text="n\n")
         assert "abc-123" not in result.output
         assert "resourceVersion" not in result.output
 
     def test_suspend_chart_cr_step_shown_on_success(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=self._mock_api()):
             result = self._run(self._args(), input_text="y\n")
         assert "chart-operator.giantswarm.io/paused" in result.output
 
     def test_in_cluster_app_does_not_call_load_wc_client(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=self._mock_api()), \
              patch("migrator.load_wc_client") as mock_load_wc:
             self._run(self._args(), input_text="y\n")
@@ -273,7 +291,7 @@ class TestMigrateCommand:
 
     def test_remote_cluster_app_calls_load_wc_client(self):
         mock_wc_api = MagicMock()
-        with patch("fetcher.fetch", return_value=(self._remote_app(), _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result(app=self._remote_app())), \
              patch("migrator.load_client", return_value=self._mock_api()), \
              patch("migrator.core_client", return_value=MagicMock()), \
              patch("migrator.load_wc_client", return_value=mock_wc_api) as mock_load_wc:
@@ -281,7 +299,7 @@ class TestMigrateCommand:
         mock_load_wc.assert_called_once()
 
     def test_load_wc_client_error_exits_nonzero(self):
-        with patch("fetcher.fetch", return_value=(self._remote_app(), _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result(app=self._remote_app())), \
              patch("migrator.load_client", return_value=self._mock_api()), \
              patch("migrator.core_client", return_value=MagicMock()), \
              patch("migrator.load_wc_client", side_effect=MigratorError("bad kubeconfig secret")):
@@ -289,7 +307,7 @@ class TestMigrateCommand:
         assert result.exit_code != 0
 
     def test_load_wc_client_error_message_printed(self):
-        with patch("fetcher.fetch", return_value=(self._remote_app(), _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result(app=self._remote_app())), \
              patch("migrator.load_client", return_value=self._mock_api()), \
              patch("migrator.core_client", return_value=MagicMock()), \
              patch("migrator.load_wc_client", side_effect=MigratorError("bad kubeconfig secret")):
@@ -297,17 +315,17 @@ class TestMigrateCommand:
         assert "bad kubeconfig secret" in result.output
 
     def test_fetch_step_shows_catalog_type(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
             result = self._run(self._args(), input_text="n\n")
         assert "oci" in result.output
 
     def test_no_issues_message_when_preflight_clean(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
             result = self._run(self._args(), input_text="n\n")
         assert "No issues found" in result.output
 
     def test_preflight_summary_shown_when_warnings(self):
-        with patch("fetcher.fetch", return_value=(_APP_WITH_NAMESPACE_CONFIG, _CATALOG_DICT)):
+        with patch("fetcher.fetch", return_value=_fetch_result(app=_APP_WITH_NAMESPACE_CONFIG)):
             result = self._run(self._args(), input_text="n\n")
         assert "warning" in result.output.lower()
 
@@ -317,7 +335,7 @@ class TestMigrateCommand:
         return api
 
     def test_apply_step_failure_exits_nonzero(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=self._apply_failing_api()), \
              patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
             mock_dyn_cls.return_value.request.side_effect = ApiException(status=500)
@@ -325,7 +343,7 @@ class TestMigrateCommand:
         assert result.exit_code != 0
 
     def test_apply_step_failure_asks_to_revert(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=self._apply_failing_api()), \
              patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
             mock_dyn_cls.return_value.request.side_effect = ApiException(status=500)
@@ -333,7 +351,7 @@ class TestMigrateCommand:
         assert "Revert changes?" in result.output
 
     def test_apply_step_failure_skips_revert_when_declined(self):
-        with patch("fetcher.fetch", return_value=(_APP_DICT, _CATALOG_DICT)), \
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
              patch("migrator.load_client", return_value=self._apply_failing_api()), \
              patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
             mock_dyn_cls.return_value.request.side_effect = ApiException(status=500)

@@ -4,20 +4,31 @@ from typing import Any, Optional
 ReferenceWithPriority = namedtuple("ReferenceWithPriority", ["reference", "priority"])
 
 
-def to_reference_with_priority(reference: dict, kind: str, default_priority: int) -> Optional[ReferenceWithPriority]:
+def _default_values_key(kind: str) -> str:
+    return "configmap-values.yaml" if kind.lower() == "configmap" else "secret-values.yaml"
+
+
+def to_reference_with_priority(reference: dict, kind: str, default_priority: int, resolution=None) -> Optional[ReferenceWithPriority]:
     if reference and reference.get("name"):
+        name = reference.get("name", "")
+        canonical_kind = kind[0].upper() + kind[1:]
+        if resolution is not None and (canonical_kind, name) in resolution.key_overrides:
+            override = resolution.key_overrides[(canonical_kind, name)]
+            values_key_items = [] if (override is None or override == "values.yaml") else [("valuesKey", override)]
+        else:
+            values_key_items = [("valuesKey", _default_values_key(kind))]
         return ReferenceWithPriority(
             priority=reference.get("priority", default_priority),
             reference=OrderedDict([
-                ("kind", kind[0].upper() + kind[1:]),
-                ("name", reference.get("name", "")),
-                ("valuesKey", "configmap-values.yaml" if kind.lower() == "configmap" else "secret-values.yaml"),
+                ("kind", canonical_kind),
+                ("name", name),
+                *values_key_items,
             ])
         )
     return None
 
 
-def calculate_values_from(app: dict) -> list[OrderedDict[Any, Any]]:
+def calculate_values_from(app: dict, resolution=None) -> list[OrderedDict[Any, Any]]:
     cluster_config_map = app["spec"].get("config", {}).get("configMap", {})
     cluster_secret = app["spec"].get("config", {}).get("secret", {})
 
@@ -28,23 +39,24 @@ def calculate_values_from(app: dict) -> list[OrderedDict[Any, Any]]:
 
     intermediate_result = []
 
-    result = to_reference_with_priority(cluster_config_map, "ConfigMap", 50)
+    result = to_reference_with_priority(cluster_config_map, "ConfigMap", 50, resolution)
     if result: intermediate_result.append(result)
 
-    result = to_reference_with_priority(cluster_secret, "Secret", 50)
+    result = to_reference_with_priority(cluster_secret, "Secret", 50, resolution)
     if result: intermediate_result.append(result)
 
-    result = to_reference_with_priority(user_config_map, "ConfigMap", 100)
+    result = to_reference_with_priority(user_config_map, "ConfigMap", 100, resolution)
     if result: intermediate_result.append(result)
 
-    result = to_reference_with_priority(user_secret, "Secret", 100)
+    result = to_reference_with_priority(user_secret, "Secret", 100, resolution)
     if result: intermediate_result.append(result)
 
     for extra_config in extra_configs:
         result = to_reference_with_priority(
             extra_config,
             extra_config.get("kind", "ConfigMap"),
-            25
+            25,
+            resolution,
         )
         if result: intermediate_result.append(result)
 

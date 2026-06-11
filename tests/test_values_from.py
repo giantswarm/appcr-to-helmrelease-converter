@@ -1,6 +1,7 @@
 from collections import OrderedDict
 
 from converter.values_from import ReferenceWithPriority, calculate_values_from, to_reference_with_priority
+from resolver import Resolution
 
 
 class TestToReferenceWithPriority:
@@ -181,6 +182,24 @@ class TestCalculateValuesFrom:
         })
         result = calculate_values_from(app)
         assert [r["name"] for r in result] == ["first", "second"]
+
+    def test_resolution_none_key_omits_values_key(self):
+        app = self._app({"config": {"configMap": {"name": "cm", "namespace": "ns"}}})
+        resolution = Resolution(key_overrides={("ConfigMap", "cm"): None})
+        result = calculate_values_from(app, resolution)
+        assert "valuesKey" not in result[0]
+
+    def test_resolution_values_yaml_key_omits_values_key(self):
+        app = self._app({"config": {"configMap": {"name": "cm", "namespace": "ns"}}})
+        resolution = Resolution(key_overrides={("ConfigMap", "cm"): "values.yaml"})
+        result = calculate_values_from(app, resolution)
+        assert "valuesKey" not in result[0]
+
+    def test_resolution_overrides_configmap_values_key(self):
+        app = self._app({"config": {"configMap": {"name": "cm", "namespace": "ns"}}})
+        resolution = Resolution(key_overrides={("ConfigMap", "cm"): "my-values.yaml"})
+        result = calculate_values_from(app, resolution)
+        assert result[0]["valuesKey"] == "my-values.yaml"
 
     def test_all_sources_five_entries(self):
         app = self._app({

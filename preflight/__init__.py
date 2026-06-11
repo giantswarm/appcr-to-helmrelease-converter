@@ -60,6 +60,34 @@ def check_multiple_helm_repos(app: dict, catalog: dict) -> list[PreflightIssue]:
     return []
 
 
+def check_missing_referenced_configs(app: dict, catalog: dict, referenced_configs: dict) -> list[PreflightIssue]:
+    return [
+        PreflightError(f"{kind} \"{name}\" not found in namespace \"{ns}\"")
+        for (kind, name, ns), resource in referenced_configs.items()
+        if resource is None
+    ]
+
+
+def check_empty_referenced_configs(app: dict, catalog: dict, referenced_configs: dict) -> list[PreflightIssue]:
+    return [
+        PreflightError(f"{kind} \"{name}\" has no data keys; cannot determine valuesKey")
+        for (kind, name, ns), resource in referenced_configs.items()
+        if resource is not None and not (resource.get("data") or {})
+    ]
+
+
+def check_cross_namespace_refs(app: dict, catalog: dict, referenced_configs: dict) -> list[PreflightIssue]:
+    app_ns = app.get("metadata", {}).get("namespace", "")
+    return [
+        PreflightError(
+            f"{kind} \"{name}\" is in namespace \"{ns}\" but app is in \"{app_ns}\"; "
+            "Flux does not support cross-namespace valuesFrom references"
+        )
+        for (kind, name, ns), resource in referenced_configs.items()
+        if ns != app_ns and resource is not None
+    ]
+
+
 _CHECKS = [
     check_kube_config,
     check_namespace_config,
@@ -67,6 +95,16 @@ _CHECKS = [
     check_multiple_helm_repos,
 ]
 
+_REFS_CHECKS = [
+    check_cross_namespace_refs,
+    check_missing_referenced_configs,
+    check_empty_referenced_configs,
+]
 
-def run_preflight(app: dict, catalog: dict) -> list[PreflightIssue]:
-    return [issue for check in _CHECKS for issue in check(app, catalog)]
+
+def run_preflight(app: dict, catalog: dict, referenced_configs: dict | None = None) -> list[PreflightIssue]:
+    refs = referenced_configs or {}
+    return (
+        [issue for check in _CHECKS for issue in check(app, catalog)]
+        + [issue for check in _REFS_CHECKS for issue in check(app, catalog, refs)]
+    )

@@ -23,12 +23,12 @@ def _helm_url_from_catalog(catalog: dict) -> str:
     raise ValueError("catalog contains no helm repository")
 
 
-def build_helm_release_and_oci_repo(app: dict, catalog: dict) -> list:
-    return [build_oci_repository(app, catalog), build_helm_release(app)]
+def build_helm_release_and_oci_repo(app: dict, catalog: dict, resolution=None) -> list:
+    return [build_oci_repository(app, catalog), build_helm_release(app, resolution)]
 
 
-def build_helm_release_and_helm_repo(app: dict, catalog: dict) -> list:
-    return [_build_helm_repository(app, catalog), _build_helm_release_helm(app)]
+def build_helm_release_and_helm_repo(app: dict, catalog: dict, resolution=None) -> list:
+    return [_build_helm_repository(app, catalog), _build_helm_release_helm(app, resolution)]
 
 
 def build_oci_repository(app: dict, catalog: dict) -> OrderedDict:
@@ -84,7 +84,7 @@ _LABEL_BLOCKLIST = {
 }
 
 
-def _build_helm_release_common(app: dict) -> OrderedDict:
+def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
     hr = OrderedDict([
         ("apiVersion", "helm.toolkit.fluxcd.io/v2"),
         ("kind", "HelmRelease"),
@@ -139,15 +139,15 @@ def _build_helm_release_common(app: dict) -> OrderedDict:
     elif app["spec"]["namespace"] not in _SERVICE_ACCOUNT_EXCLUDED_NAMESPACES:
         hr["spec"]["serviceAccountName"] = "automation"
 
-    values_from = calculate_values_from(app)
+    values_from = calculate_values_from(app, resolution)
     if values_from:
         hr["spec"]["valuesFrom"] = values_from
 
     return hr
 
 
-def build_helm_release(app: dict) -> OrderedDict:
-    hr = _build_helm_release_common(app)
+def build_helm_release(app: dict, resolution=None) -> OrderedDict:
+    hr = _build_helm_release_common(app, resolution)
     hr["spec"]["chartRef"] = OrderedDict([
         ("kind", "OCIRepository"),
         ("name", app["metadata"]["name"]),
@@ -156,11 +156,11 @@ def build_helm_release(app: dict) -> OrderedDict:
     return hr
 
 
-def _build_helm_release_helm(app: dict) -> OrderedDict:
+def _build_helm_release_helm(app: dict, resolution=None) -> OrderedDict:
     version = app["spec"].get("version")
     if not version:
         raise ValueError("spec.version is required but empty")
-    hr = _build_helm_release_common(app)
+    hr = _build_helm_release_common(app, resolution)
     hr["spec"]["chart"] = OrderedDict([
         ("spec", OrderedDict([
             ("chart", app["spec"]["name"]),

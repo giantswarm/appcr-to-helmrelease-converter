@@ -10,6 +10,7 @@ from yaml.resolver import BaseResolver
 
 import fetcher
 import migrator
+import resolver
 from converter import convert
 from fetcher import FetchError
 from preflight import PreflightError, run_preflight
@@ -78,15 +79,16 @@ def migrate_cmd(name, namespace, context):
     _section("Fetch")
     click.echo(f'Fetching "{name}" from namespace "{namespace}"...')
     try:
-        app, catalog = fetcher.fetch(name, namespace, context)
+        result = fetcher.fetch(name, namespace, context)
     except FetchError as e:
         click.echo("", err=True)
         click.echo(f"❌ {e}", err=True)
         raise SystemExit(1)
+    app, catalog = result.app, result.catalog
     _dump_highlighted([_strip_server_fields(app)])
 
     _section("Preflight checks")
-    issues = run_preflight(app, catalog)
+    issues = run_preflight(app, catalog, result.referenced_configs)
     warnings = [i for i in issues if not isinstance(i, PreflightError)]
     errors = [i for i in issues if isinstance(i, PreflightError)]
     for issue in warnings + errors:
@@ -98,8 +100,11 @@ def migrate_cmd(name, namespace, context):
     else:
         click.echo(f"{len(warnings)} warning(s), 0 errors")
 
+    _section("Resolve")
+    resolution = resolver.resolve(app, result.referenced_configs)
+
     _section("Generated Flux resources")
-    docs = convert(app, catalog)
+    docs = convert(app, catalog, resolution)
     _dump_highlighted(docs)
 
     _section("Confirm")

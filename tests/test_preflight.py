@@ -186,6 +186,75 @@ class TestCheckMultipleHelmRepos:
         assert check_multiple_helm_repos({}, {"spec": {}}) == []
 
 
+_APP_NS = "org-acme"
+_APP_BASE = {"metadata": {"namespace": _APP_NS}, "spec": {}}
+
+
+class TestCheckMissingReferencedConfigs:
+    def test_none_value_returns_error(self):
+        refs = {("ConfigMap", "cm", _APP_NS): None}
+        from preflight import check_missing_referenced_configs
+        result = check_missing_referenced_configs(_APP_BASE, _EMPTY_CATALOG, refs)
+        assert len(result) == 1
+        assert isinstance(result[0], PreflightError)
+
+    def test_present_resource_returns_empty(self):
+        refs = {("ConfigMap", "cm", _APP_NS): {"data": {"values.yaml": "x"}}}
+        from preflight import check_missing_referenced_configs
+        result = check_missing_referenced_configs(_APP_BASE, _EMPTY_CATALOG, refs)
+        assert result == []
+
+    def test_error_message_contains_name(self):
+        refs = {("ConfigMap", "my-config", _APP_NS): None}
+        from preflight import check_missing_referenced_configs
+        result = check_missing_referenced_configs(_APP_BASE, _EMPTY_CATALOG, refs)
+        assert "my-config" in str(result[0])
+
+
+class TestCheckEmptyReferencedConfigs:
+    def test_empty_data_returns_error(self):
+        refs = {("ConfigMap", "cm", _APP_NS): {"data": {}}}
+        from preflight import check_empty_referenced_configs
+        result = check_empty_referenced_configs(_APP_BASE, _EMPTY_CATALOG, refs)
+        assert len(result) == 1
+        assert isinstance(result[0], PreflightError)
+
+    def test_none_data_returns_error(self):
+        refs = {("ConfigMap", "cm", _APP_NS): {"data": None}}
+        from preflight import check_empty_referenced_configs
+        result = check_empty_referenced_configs(_APP_BASE, _EMPTY_CATALOG, refs)
+        assert len(result) == 1
+        assert isinstance(result[0], PreflightError)
+
+    def test_resource_with_keys_returns_empty(self):
+        refs = {("ConfigMap", "cm", _APP_NS): {"data": {"values.yaml": "x"}}}
+        from preflight import check_empty_referenced_configs
+        result = check_empty_referenced_configs(_APP_BASE, _EMPTY_CATALOG, refs)
+        assert result == []
+
+
+class TestCheckCrossNamespaceRefs:
+    def test_different_namespace_returns_error(self):
+        refs = {("ConfigMap", "cm", "other-ns"): {"data": {"values.yaml": "x"}}}
+        from preflight import check_cross_namespace_refs
+        result = check_cross_namespace_refs(_APP_BASE, _EMPTY_CATALOG, refs)
+        assert len(result) == 1
+        assert isinstance(result[0], PreflightError)
+
+    def test_same_namespace_returns_empty(self):
+        refs = {("ConfigMap", "cm", _APP_NS): {"data": {"values.yaml": "x"}}}
+        from preflight import check_cross_namespace_refs
+        result = check_cross_namespace_refs(_APP_BASE, _EMPTY_CATALOG, refs)
+        assert result == []
+
+    def test_error_message_contains_both_namespaces(self):
+        refs = {("ConfigMap", "cm", "other-ns"): {"data": {}}}
+        from preflight import check_cross_namespace_refs
+        result = check_cross_namespace_refs(_APP_BASE, _EMPTY_CATALOG, refs)
+        assert "other-ns" in str(result[0])
+        assert _APP_NS in str(result[0])
+
+
 class TestRunPreflight:
     def test_returns_warning_when_namespace_config_present(self):
         issues = run_preflight(APP_WITH_NAMESPACE_CONFIG, _EMPTY_CATALOG)

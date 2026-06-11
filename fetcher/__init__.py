@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass, field
 
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
@@ -9,6 +10,13 @@ class FetchError(Exception):
     pass
 
 
+@dataclass
+class FetchResult:
+    app: dict
+    catalog: dict
+    referenced_configs: dict = field(default_factory=dict)
+
+
 def _api_message(e: ApiException) -> str:
     try:
         return json.loads(e.body)["message"]
@@ -16,7 +24,7 @@ def _api_message(e: ApiException) -> str:
         return e.reason or str(e.status)
 
 
-def fetch(name: str, namespace: str, context: str | None = None) -> tuple[dict, dict]:
+def fetch(name: str, namespace: str, context: str | None = None) -> FetchResult:
     try:
         config.load_kube_config(context=context)
     except ConfigException as e:
@@ -59,4 +67,46 @@ def fetch(name: str, namespace: str, context: str | None = None) -> tuple[dict, 
     if catalog is None:
         raise FetchError(f"failed to fetch Catalog {catalog_name}: not found in default or giantswarm")
 
-    return app, catalog
+    core_api = client.CoreV1Api()
+    referenced_configs = _fetch_referenced_configs(app, core_api)
+    return FetchResult(app=app, catalog=catalog, referenced_configs=referenced_configs)
+
+
+def iter_refs(app: dict):
+    app_ns = app["metadata"]["namespace"]
+    spec = app.get("spec", {})
+
+    for section, kind in [("config", "ConfigMap"), ("config", "Secret"),
+                           ("userConfig", "ConfigMap"), ("userConfig", "Secret")]:
+        sub_key = "configMap" if kind == "ConfigMap" else "secret"
+        ref = spec.get(section, {}).get(sub_key, {})
+        if ref and ref.get("name"):
+            ns = ref.get("namespace") or app_ns
+            yield kind, ref["name"], ns
+
+    for entry in spec.get("extraConfigs", []):
+        if entry.get("name"):
+            kind = entry.get("kind", "ConfigMap")
+            kind = kind[0].upper() + kind[1:]
+            ns = entry.get("namespace") or app_ns
+            yield kind, entry["name"], ns
+
+
+def _fetch_one(core_api, kind: str, name: str, ns: str) -> dict | None:
+    try:
+        if kind == "ConfigMap":
+            return core_api.read_namespaced_config_map(name=name, namespace=ns).to_dict()
+        return core_api.read_namespaced_secret(name=name, namespace=ns).to_dict()
+    except ApiException as e:
+        if e.status == 404:
+            return None
+        raise FetchError(f"failed to fetch {kind} {ns}/{name}: {_api_message(e)}") from e
+
+
+def _fetch_referenced_configs(app: dict, core_api) -> dict:
+    refs = {}
+    for kind, name, ns in iter_refs(app):
+        key = (kind, name, ns)
+        if key not in refs:
+            refs[key] = _fetch_one(core_api, kind, name, ns)
+    return refs
