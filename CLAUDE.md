@@ -1,44 +1,28 @@
 # appcr-to-helmrelease-converter
 
-Converts App CRs into Flux CD resources (OCIRepository or HelmRepository + HelmRelease). Three commands at different capability levels — see `CONTEXT.md` for domain terminology.
+Converts App CRs into Flux CD resources (OCIRepository or HelmRepository + HelmRelease). Single `migrate` command — cluster access required. See `CONTEXT.md` for domain terminology and ADR 0015 for why offline conversion was removed.
 
 ```bash
-# Offline: multi-doc YAML (App CR + Catalog CR separated by ---) from stdin or file
-cat my-app-and-catalog.yaml | python main.py convert
-python main.py convert my-app-and-catalog.yaml
-
-# Fetch CRs from MC as multi-doc YAML (pipeable into convert)
-python main.py fetch --name my-app --namespace giantswarm
-python main.py fetch --name my-app --namespace giantswarm --context my-context
-
-# Fetch and convert in one step
-python main.py fetch-and-convert --name my-app --namespace giantswarm
-python main.py fetch-and-convert --name my-app --namespace giantswarm --context my-context
-
-# Full live migration (planned)
 python main.py migrate --name my-app --namespace giantswarm
+python main.py migrate --name my-app --namespace giantswarm --context my-context
 ```
 
 ## Current state
 
-`converter/` package (pure functions) + `fetcher/` package (I/O) + click CLI in `main.py`. Dependencies: pyyaml, click, kubernetes.
+`converter/` package (pure functions) + `fetcher/` package (I/O) + `migrator/` package (migration steps) + `preflight/` package + click CLI in `main.py`. Dependencies: pyyaml, click, kubernetes, rich.
 
 ## Intended evolution
 
 ### Near term
 
-- Catalog CR as required second input; conversion path from `spec.repositories[].type` (see ADR 0007)
-- `fetch-and-convert` command: `--name`, `--namespace`, optional `--context` (see ADR 0008, ADR 0009)
-- Input validation
+- Collapse CLI to single `migrate` command: remove `convert`, `fetch`, `fetch-and-convert` from `main.py` and tests (ADR 0015)
+- Resolver layer: `resolver/` package resolves `valuesKey` from live cluster data; interactive prompt when multiple keys; `Resolution` passed into converter (ADR 0016)
+- Success cleanup (9g): Flux-managed apps print manual deletion instructions; non-Flux-managed apps prompt and delete
 
-### Longer term: live migration wrapper
+### Longer term
 
-A subcommand or separate script that drives a full live migration:
-1. Suspend the App CR and Chart CR on the MC (`app-operator.giantswarm.io/paused`, `chart-operator.giantswarm.io/paused` annotations)
-2. Apply the converted OCIRepository + HelmRelease
-3. Monitor the HelmRelease rollout
-4. Surface diagnostics on failure (events, helm history, pod status)
-5. Revert if needed (delete HR/OCIRepo, remove suspension annotations)
+- Diagnostics on migration failure: surface events, helm history, pod status
+- Success cleanup (9g)
 
 ### Containerization
 
@@ -98,11 +82,11 @@ Fields present in real App CRs that are not yet handled. Each item is a separate
 
 **1a. converter — Catalog CR integration (Path A + Path B)** ✓ _Implemented. `convert()` branches on catalog type. OCI present → Path A: `build_helm_release_and_oci_repo()` → [OCIRepository, HelmRelease with `spec.chartRef`]. Helm only → Path B: `build_helm_release_and_helm_repo()` → [HelmRepository, HelmRelease with `spec.chart.spec`]. Both paths share boilerplate via `_build_helm_release_common()`. Preflight warning in `main.py` when catalog has multiple `helm` entries (uses first). `spec.storage` fallback supported for both paths. See ADR 0007._
 
-**1b. `convert` command — multi-doc YAML input** ✓ _Implemented: `_identify_docs()` with `yaml.safe_load_all()`, identifies by `kind` + `apiVersion: application.giantswarm.io/v1alpha1`, hard-errors on missing or duplicate docs, order-independent. See ADR 0007, ADR 0011._
+**1b. `convert` command — multi-doc YAML input** ~~✓ Implemented~~ _Superseded by ADR 0015: command removed. See ADR 0011._
 
-**1c. `fetch` command** ✓ _Implemented: `--name`, `--namespace`, optional `--context`; emits Catalog CR first, App CR second; strips server-side metadata fields and `kubectl.kubernetes.io/last-applied-configuration` annotation in `main.py`. See ADR 0008, ADR 0010._
+**1c. `fetch` command** ~~✓ Implemented~~ _Superseded by ADR 0015: command removed. See ADR 0008, ADR 0010._
 
-**1d. `fetch-and-convert` command** ✓ _Implemented: `--name`, `--namespace`, optional `--context`; calls `fetcher.fetch()`, runs multiple-helm-repo and preflight checks, then converts and dumps Flux YAML. Preflight errors exit nonzero; warnings print and continue. No server-field stripping — raw CRs go straight to converter. See ADR 0008._
+**1d. `fetch-and-convert` command** ~~✓ Implemented~~ _Superseded by ADR 0015: command removed. See ADR 0008._
 
 **3. kubeConfig — remote cluster targeting** ✓ _Implemented: emit `spec.kubeConfig.secretRef.name` on HelmRelease when `inCluster: false`. See commit 199bf5b._
 
@@ -132,6 +116,10 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 **9f. Revert** ~~_(not started)_~~ _Obsolete: revert logic is now baked into each `MigrationStep.revert()` + `MigrationRunner.revert_all()` (LIFO). The skip-revert + print manual steps path belongs in the 9e Monitor step or `main.py` error handler. See ADR 0013._
 
 **9g. Success cleanup** _(not started)_ Flux-managed: print instructions to manually delete App CR + Chart CR. Non-Flux-managed: prompt and delete both.
+
+**10. Collapse to single `migrate` command** _(not started)_ Remove `convert`, `fetch`, and `fetch-and-convert` commands and their tests from `main.py`. Retain `fetcher/` package. See ADR 0015.
+
+**11. Resolver layer with interactive valuesKey selection** _(not started)_ New `resolver/` package: iterates all ConfigMap/Secret refs from `spec.extraConfigs`, `spec.config`, `spec.userConfig`; looks each up via `CoreV1Api` in `app.metadata.namespace`; resolves `valuesKey` from actual data keys (single key → auto; multiple keys → interactive prompt; `values.yaml` → `None` to omit). `Resolution` dataclass with `key_overrides: dict[tuple[str, str], str | None]` passed into `converter.convert()` and `calculate_values_from()` as optional parameter (fallback to hardcoded defaults when `None`). New cross-namespace valuesFrom preflight check errors if any ref has a `namespace` differing from `app.metadata.namespace`. Wired between preflight and convert in `migrate`. See ADR 0016.
 
 ## Dev setup
 
