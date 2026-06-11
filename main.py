@@ -53,10 +53,6 @@ def _to_yaml_str(docs) -> str:
     return "---\n" + buf.getvalue()
 
 
-def _dump(docs):
-    print(_to_yaml_str(docs), end="")
-
-
 def _dump_highlighted(docs):
     Console(file=sys.stdout, highlight=False).print(
         Syntax(_to_yaml_str(docs), "yaml", theme="monokai", word_wrap=True)
@@ -68,95 +64,10 @@ def cli():
     pass
 
 
-_GS_API_VERSION = "application.giantswarm.io/v1alpha1"
-
-
-def _identify_docs(content: str) -> tuple[dict, dict]:
-    app, catalog = None, None
-    for doc in yaml.safe_load_all(content):
-        if doc is None:
-            continue
-        if doc.get("apiVersion") != _GS_API_VERSION:
-            continue
-        kind = doc.get("kind")
-        if kind == "App":
-            if app is not None:
-                raise ValueError("duplicate App CR in input")
-            app = doc
-        elif kind == "Catalog":
-            if catalog is not None:
-                raise ValueError("duplicate Catalog CR in input")
-            catalog = doc
-    if app is None:
-        raise ValueError("App CR not found in input")
-    if catalog is None:
-        raise ValueError("Catalog CR not found in input")
-    return app, catalog
-
-
 def _section(title: str) -> None:
     con = Console(file=sys.stdout, highlight=False)
     con.print()
     con.rule(f"[bold cyan]▌ {title}[/bold cyan]", align="left")
-
-
-def _check_and_emit(app: dict, catalog: dict) -> None:
-    issues = run_preflight(app, catalog)
-    warnings = [i for i in issues if not isinstance(i, PreflightError)]
-    errors = [i for i in issues if isinstance(i, PreflightError)]
-    for issue in warnings + errors:
-        click.echo(issue.display(), err=True)
-    if errors:
-        raise SystemExit(1)
-
-
-@cli.command()
-@click.argument("input", type=click.File("r"), default="-")
-def convert_cmd(input):
-    content = input.read()
-    try:
-        app, catalog = _identify_docs(content)
-    except ValueError as e:
-        click.echo(f"error: {e}", err=True)
-        raise SystemExit(1)
-    _check_and_emit(app, catalog)
-    _dump(convert(app, catalog))
-
-
-cli.add_command(convert_cmd, name="convert")
-
-
-@cli.command()
-@click.option("--name", required=True)
-@click.option("--namespace", required=True)
-@click.option("--context", "context", default=None)
-def fetch_cmd(name, namespace, context):
-    try:
-        app, catalog = fetcher.fetch(name, namespace, context)
-    except FetchError as e:
-        click.echo(f"error: {e}", err=True)
-        raise SystemExit(1)
-    _dump([_strip_server_fields(catalog), _strip_server_fields(app)])
-
-
-cli.add_command(fetch_cmd, name="fetch")
-
-
-@cli.command()
-@click.option("--name", required=True)
-@click.option("--namespace", required=True)
-@click.option("--context", "context", default=None)
-def fetch_and_convert_cmd(name, namespace, context):
-    try:
-        app, catalog = fetcher.fetch(name, namespace, context)
-    except FetchError as e:
-        click.echo(f"error: {e}", err=True)
-        raise SystemExit(1)
-    _check_and_emit(app, catalog)
-    _dump(convert(app, catalog))
-
-
-cli.add_command(fetch_and_convert_cmd, name="fetch-and-convert")
 
 
 @cli.command()
@@ -172,15 +83,7 @@ def migrate_cmd(name, namespace, context):
         click.echo("", err=True)
         click.echo(f"❌ {e}", err=True)
         raise SystemExit(1)
-    app_version = app.get("spec", {}).get("version", "")
-    app_catalog = app.get("spec", {}).get("catalog", "")
-    catalog_meta_name = catalog.get("metadata", {}).get("name", "")
-    repos = (catalog.get("spec") or {}).get("repositories") or []
-    catalog_type = repos[0].get("type", "unknown") if repos else "unknown"
-    click.echo("")
-    click.echo(f"App CR:     {name} (version: {app_version}, catalog: {app_catalog})")
-    click.echo("")
-    click.echo(f"Catalog CR: {catalog_meta_name} (type: {catalog_type})")
+    _dump_highlighted([_strip_server_fields(app)])
 
     _section("Preflight checks")
     issues = run_preflight(app, catalog)

@@ -15,7 +15,6 @@ python main.py migrate --name my-app --namespace giantswarm --context my-context
 
 ### Near term
 
-- Collapse CLI to single `migrate` command: remove `convert`, `fetch`, `fetch-and-convert` from `main.py` and tests (ADR 0015)
 - Resolver layer: `resolver/` package resolves `valuesKey` from live cluster data; interactive prompt when multiple keys; `Resolution` passed into converter (ADR 0016)
 - Success cleanup (9g): Flux-managed apps print manual deletion instructions; non-Flux-managed apps prompt and delete
 
@@ -117,7 +116,7 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **9g. Success cleanup** _(not started)_ Flux-managed: print instructions to manually delete App CR + Chart CR. Non-Flux-managed: prompt and delete both.
 
-**10. Collapse to single `migrate` command** _(not started)_ Remove `convert`, `fetch`, and `fetch-and-convert` commands and their tests from `main.py`. Retain `fetcher/` package. See ADR 0015.
+**10. Collapse to single `migrate` command** ✓ _Implemented: removed `convert`, `fetch`, `fetch-and-convert` commands, helpers (`_identify_docs`, `_dump`, `_check_and_emit`), and their tests. `migrate` Fetch section now displays the stripped App CR YAML. `fetcher/` package retained. See ADR 0015._
 
 **11. Resolver layer with interactive valuesKey selection** _(not started)_ New `resolver/` package: iterates all ConfigMap/Secret refs from `spec.extraConfigs`, `spec.config`, `spec.userConfig`; looks each up via `CoreV1Api` in `app.metadata.namespace`; resolves `valuesKey` from actual data keys (single key → auto; multiple keys → interactive prompt; `values.yaml` → `None` to omit). `Resolution` dataclass with `key_overrides: dict[tuple[str, str], str | None]` passed into `converter.convert()` and `calculate_values_from()` as optional parameter (fallback to hardcoded defaults when `None`). New cross-namespace valuesFrom preflight check errors if any ref has a `namespace` differing from `app.metadata.namespace`. Wired between preflight and convert in `migrate`. See ADR 0016.
 

@@ -4,7 +4,7 @@ Date: 2026-06-10
 
 ## Status
 
-Accepted. Supersedes ADR 0008.
+Implemented. Supersedes ADR 0008.
 
 ## Context
 
