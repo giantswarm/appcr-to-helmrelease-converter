@@ -6,6 +6,9 @@ from kubernetes.client.exceptions import ApiException
 from kubernetes.config.config_exception import ConfigException
 
 
+_DEPENDS_ON_ANNOTATION = "app-operator.giantswarm.io/depends-on"
+
+
 class FetchError(Exception):
     pass
 
@@ -80,9 +83,7 @@ def fetch(name: str, namespace: str, context: str | None = None) -> FetchResult:
 
 
 def _fetch_dependency_helm_releases(api, app: dict, namespace: str) -> dict:
-    raw = (app.get("metadata") or {}).get("annotations", {}).get(
-        "app-operator.giantswarm.io/depends-on", ""
-    )
+    raw = ((app.get("metadata") or {}).get("annotations") or {}).get(_DEPENDS_ON_ANNOTATION) or ""
     names = [n.strip() for n in raw.split(",") if n.strip()]
     result = {}
     for name in names:

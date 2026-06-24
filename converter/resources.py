@@ -85,8 +85,10 @@ def _build_helm_repository(app: dict, catalog: dict) -> OrderedDict:
 _SERVICE_ACCOUNT_EXCLUDED_NAMESPACES = {"giantswarm", "flux-giantswarm", "monitoring"}
 
 
+_DEPENDS_ON_ANNOTATION = "app-operator.giantswarm.io/depends-on"
+
 _ANNOTATION_BLOCKLIST = {
-    "app-operator.giantswarm.io/depends-on",
+    _DEPENDS_ON_ANNOTATION,
     "app-operator.giantswarm.io/depends-on-helmrelease",
     "app-operator.giantswarm.io/latest-configmap-version",
     "app-operator.giantswarm.io/latest-secret-version",
@@ -100,9 +102,7 @@ _LABEL_BLOCKLIST = {
 
 
 def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
-    depends_on_raw = app["metadata"].get("annotations", {}).get(
-        "app-operator.giantswarm.io/depends-on", ""
-    )
+    depends_on_raw = (app["metadata"].get("annotations") or {}).get(_DEPENDS_ON_ANNOTATION) or ""
     depends_on = [n.strip() for n in depends_on_raw.split(",") if n.strip()]
 
     spec_items = []

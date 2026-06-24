@@ -157,27 +157,35 @@ class TestFetch:
         assert result.catalog == CATALOG_DICT
 
     def test_catalog_found_in_giantswarm_when_not_in_default(self):
+        def _get(group, version, namespace, plural, name):
+            if plural == "apps":
+                return APP_DICT_NO_CATALOG_NS
+            if plural == "catalogs" and namespace == "default":
+                raise ApiException(status=404)
+            if plural == "catalogs" and namespace == "giantswarm":
+                return CATALOG_DICT
+            raise ApiException(status=404)  # helmreleases (no depends-on)
+
         mock_api = MagicMock()
-        mock_api.get_namespaced_custom_object.side_effect = [
-            APP_DICT_NO_CATALOG_NS,
-            ApiException(status=404),
-            CATALOG_DICT,
-        ]
+        mock_api.get_namespaced_custom_object.side_effect = _get
         with patch("kubernetes.config.load_kube_config"), \
              patch("kubernetes.client.CustomObjectsApi", return_value=mock_api), \
              patch("kubernetes.client.CoreV1Api"):
             result = fetch("my-app", "giantswarm")
-        third_call = mock_api.get_namespaced_custom_object.call_args_list[2]
-        assert third_call.kwargs["namespace"] == "giantswarm"
+        catalog_calls = [c for c in mock_api.get_namespaced_custom_object.call_args_list
+                         if c.kwargs.get("plural") == "catalogs"]
+        assert catalog_calls[0].kwargs["namespace"] == "default"
+        assert catalog_calls[1].kwargs["namespace"] == "giantswarm"
         assert result.catalog == CATALOG_DICT
 
     def test_raises_fetch_error_when_catalog_not_in_default_or_giantswarm(self):
+        def _get(group, version, namespace, plural, name):
+            if plural == "apps":
+                return APP_DICT_NO_CATALOG_NS
+            raise ApiException(status=404)
+
         mock_api = MagicMock()
-        mock_api.get_namespaced_custom_object.side_effect = [
-            APP_DICT_NO_CATALOG_NS,
-            ApiException(status=404),
-            ApiException(status=404),
-        ]
+        mock_api.get_namespaced_custom_object.side_effect = _get
         with patch("kubernetes.config.load_kube_config"), \
              patch("kubernetes.client.CustomObjectsApi", return_value=mock_api):
             with pytest.raises(FetchError, match="not found in default or giantswarm"):
@@ -246,14 +254,12 @@ class TestFetchReferencedConfigs:
 
     def _fetch_with_app(self, spec_extra):
         app = {**APP_DICT, "spec": {**APP_DICT["spec"], **spec_extra}}
-        custom_api = MagicMock()
-        custom_api.get_namespaced_custom_object.side_effect = [app, CATALOG_DICT]
         cm_key = ("ConfigMap", "my-cm", self._NS)
         secret_key = ("Secret", "my-secret", self._NS)
         resources = {cm_key: _CM, secret_key: _SECRET}
         core_api = _mock_core_api(resources)
         with patch("kubernetes.config.load_kube_config"), \
-             patch("kubernetes.client.CustomObjectsApi", return_value=custom_api), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=_mock_api(app_dict=app)), \
              patch("kubernetes.client.CoreV1Api", return_value=core_api):
             return fetch("my-app", self._NS)
 
@@ -274,12 +280,9 @@ class TestFetchReferencedConfigs:
     def test_404_stored_as_none(self):
         app = {**APP_DICT, "spec": {**APP_DICT["spec"],
                "config": {"configMap": {"name": "missing-cm", "namespace": self._NS}}}}
-        custom_api = MagicMock()
-        custom_api.get_namespaced_custom_object.side_effect = [app, CATALOG_DICT]
-        core_api = _mock_core_api({})  # nothing found → 404
         with patch("kubernetes.config.load_kube_config"), \
-             patch("kubernetes.client.CustomObjectsApi", return_value=custom_api), \
-             patch("kubernetes.client.CoreV1Api", return_value=core_api):
+             patch("kubernetes.client.CustomObjectsApi", return_value=_mock_api(app_dict=app)), \
+             patch("kubernetes.client.CoreV1Api", return_value=_mock_core_api({})):
             result = fetch("my-app", self._NS)
         assert result.referenced_configs[("ConfigMap", "missing-cm", self._NS)] is None
 
@@ -298,11 +301,9 @@ class TestFetchReferencedConfigs:
         app = {**APP_DICT, "spec": {**APP_DICT["spec"],
                "config": {"configMap": {"name": "my-cm", "namespace": self._NS}},
                "extraConfigs": [{"name": "my-cm", "namespace": self._NS}]}}
-        custom_api = MagicMock()
-        custom_api.get_namespaced_custom_object.side_effect = [app, CATALOG_DICT]
         core_api = _mock_core_api({("ConfigMap", "my-cm", self._NS): _CM})
         with patch("kubernetes.config.load_kube_config"), \
-             patch("kubernetes.client.CustomObjectsApi", return_value=custom_api), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=_mock_api(app_dict=app)), \
              patch("kubernetes.client.CoreV1Api", return_value=core_api):
             fetch("my-app", self._NS)
         assert core_api.read_namespaced_config_map.call_count == 1
@@ -315,11 +316,9 @@ class TestFetchReferencedConfigs:
         app = {**APP_DICT, "spec": {**APP_DICT["spec"],
                "config": {"configMap": {"name": "my-cm", "namespace": self._NS}},
                "userConfig": {"configMap": {"name": "my-cm", "namespace": self._NS}}}}
-        custom_api = MagicMock()
-        custom_api.get_namespaced_custom_object.side_effect = [app, CATALOG_DICT]
         core_api = _mock_core_api({("ConfigMap", "my-cm", self._NS): _CM})
         with patch("kubernetes.config.load_kube_config"), \
-             patch("kubernetes.client.CustomObjectsApi", return_value=custom_api), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=_mock_api(app_dict=app)), \
              patch("kubernetes.client.CoreV1Api", return_value=core_api):
             fetch("my-app", self._NS)
         assert core_api.read_namespaced_config_map.call_count == 1
@@ -327,12 +326,10 @@ class TestFetchReferencedConfigs:
     def test_non_404_api_exception_on_config_ref_raises_fetch_error(self):
         app = {**APP_DICT, "spec": {**APP_DICT["spec"],
                "config": {"configMap": {"name": "my-cm", "namespace": self._NS}}}}
-        custom_api = MagicMock()
-        custom_api.get_namespaced_custom_object.side_effect = [app, CATALOG_DICT]
         core_api = MagicMock()
         core_api.read_namespaced_config_map.side_effect = ApiException(status=403)
         with patch("kubernetes.config.load_kube_config"), \
-             patch("kubernetes.client.CustomObjectsApi", return_value=custom_api), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=_mock_api(app_dict=app)), \
              patch("kubernetes.client.CoreV1Api", return_value=core_api):
             with pytest.raises(FetchError):
                 fetch("my-app", self._NS)
@@ -359,6 +356,9 @@ class TestFetchDependencyHelmReleases:
              patch("kubernetes.client.CoreV1Api"):
             result = fetch("my-app", "giantswarm")
         assert result.dependency_helm_releases == {"coredns": _HR_DICT}
+        hr_calls = [c for c in api.get_namespaced_custom_object.call_args_list
+                    if c.kwargs.get("plural") == "helmreleases"]
+        assert hr_calls[0].kwargs["namespace"] == "giantswarm"
 
     def test_dep_not_found_stored_as_none(self):
         api = _mock_api(app_dict=_APP_WITH_DEPS, helm_releases={})
@@ -367,6 +367,15 @@ class TestFetchDependencyHelmReleases:
              patch("kubernetes.client.CoreV1Api"):
             result = fetch("my-app", "giantswarm")
         assert result.dependency_helm_releases == {"coredns": None}
+
+    def test_null_annotations_yields_empty_dict(self):
+        app = {**_APP_WITH_DEPS, "metadata": {**_APP_WITH_DEPS["metadata"], "annotations": None}}
+        api = _mock_api(app_dict=app)
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=api), \
+             patch("kubernetes.client.CoreV1Api"):
+            result = fetch("my-app", "giantswarm")
+        assert result.dependency_helm_releases == {}
 
     def test_non_404_error_on_dep_lookup_raises_fetch_error(self):
         api = MagicMock()
