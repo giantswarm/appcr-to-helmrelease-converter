@@ -122,6 +122,8 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **12. Filter Flux labels and annotations by prefix** ✓ _Implemented: `fluxcd.io/` substring filter on both annotations and labels in `_build_helm_release_common()`. GS-specific blocklist extended with `app-operator.giantswarm.io/latest-configmap-version` and `app-operator.giantswarm.io/latest-secret-version`. See ADR 0017._
 
+**13. Preflight warnings for OCI fallback and Flux-managed App CRs** ✓ _Implemented:_ Two new `PreflightWarning` checks in `preflight/__init__.py`: `check_oci_fallback` warns when catalog has no OCI type (converter will use HelmRepository path); `check_flux_managed` warns when App CR carries kustomize labels, instructing the operator to commit converted resources to gitops, remove the App CR from gitops, and manually strip finalizers `operatorkit.giantswarm.io/app-operator-app` (App CR) and `operatorkit.giantswarm.io/chart-operator-chart` (Chart CR). See ADR 0018.
+
 ## Dev setup
 
 ```bash

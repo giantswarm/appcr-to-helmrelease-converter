@@ -50,6 +50,30 @@ def check_empty_values_from_names(app: dict, catalog: dict) -> list[PreflightIss
     return issues
 
 
+def check_oci_fallback(app: dict, catalog: dict) -> list[PreflightIssue]:
+    spec = catalog.get("spec") or {}
+    has_oci = any(r.get("type") == "oci" for r in (spec.get("repositories") or [])) \
+        or (spec.get("storage") or {}).get("type") == "oci"
+    if not has_oci:
+        return [PreflightWarning(
+            "catalog has no OCI repository; conversion will use HelmRepository (deprecated by Flux — "
+            "no new features; OCI is the preferred source type)"
+        )]
+    return []
+
+
+def check_flux_managed(app: dict, catalog: dict) -> list[PreflightIssue]:
+    labels = (app.get("metadata") or {}).get("labels") or {}
+    if "kustomize.toolkit.fluxcd.io/name" in labels and "kustomize.toolkit.fluxcd.io/namespace" in labels:
+        return [PreflightWarning(
+            "App CR is managed by Flux; after migration add the converted HelmRelease and source resource "
+            "to your gitops repository and remove the App CR from it. "
+            "Remove finalizer operatorkit.giantswarm.io/app-operator-app from the App CR "
+            "and operatorkit.giantswarm.io/chart-operator-chart from the Chart CR manually."
+        )]
+    return []
+
+
 def check_multiple_helm_repos(app: dict, catalog: dict) -> list[PreflightIssue]:
     count = sum(
         1 for repo in (catalog.get("spec") or {}).get("repositories") or []
@@ -93,6 +117,8 @@ _CHECKS = [
     check_namespace_config,
     check_empty_values_from_names,
     check_multiple_helm_repos,
+    check_oci_fallback,
+    check_flux_managed,
 ]
 
 _REFS_CHECKS = [

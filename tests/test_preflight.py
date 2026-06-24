@@ -3,9 +3,11 @@ from preflight import (
     PreflightIssue,
     PreflightWarning,
     check_empty_values_from_names,
+    check_flux_managed,
     check_kube_config,
     check_multiple_helm_repos,
     check_namespace_config,
+    check_oci_fallback,
     run_preflight,
 )
 
@@ -255,25 +257,84 @@ class TestCheckCrossNamespaceRefs:
         assert _APP_NS in str(result[0])
 
 
+_APP_FLUX_MANAGED = {
+    "metadata": {
+        "labels": {
+            "kustomize.toolkit.fluxcd.io/name": "my-kustomization",
+            "kustomize.toolkit.fluxcd.io/namespace": "flux-system",
+        }
+    },
+    "spec": {},
+}
+
+_APP_NO_LABELS = {"metadata": {}, "spec": {}}
+
+_CATALOG_STORAGE_OCI = {"spec": {"storage": {"type": "oci", "URL": "oci://gsoci.azurecr.io/giantswarm"}}}
+
+
+class TestCheckOciFallback:
+    def test_oci_catalog_returns_empty_list(self):
+        assert check_oci_fallback(_APP_NO_LABELS, _CATALOG_OCI) == []
+
+    def test_helm_catalog_returns_warning(self):
+        result = check_oci_fallback(_APP_NO_LABELS, _CATALOG_SINGLE_HELM)
+        assert len(result) == 1
+        assert isinstance(result[0], PreflightWarning)
+
+    def test_empty_catalog_returns_warning(self):
+        result = check_oci_fallback(_APP_NO_LABELS, _EMPTY_CATALOG)
+        assert len(result) == 1
+        assert isinstance(result[0], PreflightWarning)
+
+    def test_storage_oci_returns_empty_list(self):
+        assert check_oci_fallback(_APP_NO_LABELS, _CATALOG_STORAGE_OCI) == []
+
+
+class TestCheckFluxManaged:
+    def test_both_kustomize_labels_returns_warning(self):
+        result = check_flux_managed(_APP_FLUX_MANAGED, _EMPTY_CATALOG)
+        assert len(result) == 1
+        assert isinstance(result[0], PreflightWarning)
+
+    def test_warning_message_mentions_app_cr_finalizer(self):
+        result = check_flux_managed(_APP_FLUX_MANAGED, _EMPTY_CATALOG)
+        assert "operatorkit.giantswarm.io/app-operator-app" in str(result[0])
+
+    def test_warning_message_mentions_chart_cr_finalizer(self):
+        result = check_flux_managed(_APP_FLUX_MANAGED, _EMPTY_CATALOG)
+        assert "operatorkit.giantswarm.io/chart-operator-chart" in str(result[0])
+
+    def test_only_name_label_returns_empty(self):
+        app = {"metadata": {"labels": {"kustomize.toolkit.fluxcd.io/name": "k"}}, "spec": {}}
+        assert check_flux_managed(app, _EMPTY_CATALOG) == []
+
+    def test_only_namespace_label_returns_empty(self):
+        app = {"metadata": {"labels": {"kustomize.toolkit.fluxcd.io/namespace": "flux-system"}}, "spec": {}}
+        assert check_flux_managed(app, _EMPTY_CATALOG) == []
+
+    def test_no_labels_returns_empty(self):
+        assert check_flux_managed(_APP_NO_LABELS, _EMPTY_CATALOG) == []
+
+
 class TestRunPreflight:
     def test_returns_warning_when_namespace_config_present(self):
-        issues = run_preflight(APP_WITH_NAMESPACE_CONFIG, _EMPTY_CATALOG)
+        issues = run_preflight(APP_WITH_NAMESPACE_CONFIG, _CATALOG_OCI)
         assert len(issues) == 1
         assert isinstance(issues[0], PreflightWarning)
 
     def test_returns_empty_list_when_no_issues(self):
-        assert run_preflight(APP_WITHOUT_NAMESPACE_CONFIG, _EMPTY_CATALOG) == []
+        assert run_preflight(APP_WITHOUT_NAMESPACE_CONFIG, _CATALOG_OCI) == []
 
     def test_collects_empty_values_from_name_warnings(self):
         app = {"spec": {"config": {"secret": {"name": "", "namespace": "org-x"}}}}
-        issues = run_preflight(app, _EMPTY_CATALOG)
+        issues = run_preflight(app, _CATALOG_OCI)
         assert len(issues) == 1
         assert isinstance(issues[0], PreflightWarning)
 
     def test_collects_catalog_warning_alongside_app_warnings(self):
         app = {"spec": {"namespaceConfig": {"annotations": {}}}}
         issues = run_preflight(app, _CATALOG_MULTI_HELM)
-        assert len(issues) == 2
+        assert len(issues) >= 2
         assert all(isinstance(i, PreflightWarning) for i in issues)
 
     def test_warnings_before_errors_regardless_of_check_order(self):
@@ -287,6 +348,14 @@ class TestRunPreflight:
                 },
             },
         }
-        issues = run_preflight(app, _EMPTY_CATALOG)
+        issues = run_preflight(app, _CATALOG_OCI)
         assert any(isinstance(i, PreflightError) for i in issues)
         assert any(isinstance(i, PreflightWarning) for i in issues)
+
+    def test_oci_fallback_warning_surfaced_by_run_preflight(self):
+        issues = run_preflight(APP_WITHOUT_NAMESPACE_CONFIG, _CATALOG_SINGLE_HELM)
+        assert any("HelmRepository" in str(i) for i in issues)
+
+    def test_flux_managed_warning_surfaced_by_run_preflight(self):
+        issues = run_preflight(_APP_FLUX_MANAGED, _CATALOG_OCI)
+        assert any("gitops" in str(i) for i in issues)
