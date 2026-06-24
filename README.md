@@ -6,23 +6,23 @@ It fetches the App CR and its Catalog CR from the cluster, converts them into th
 
 ## Prerequisites
 
-- Python 3.12+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
 - `kubectl` access to the Management Cluster (or a valid `--context`)
 - The target app must already be running (the tool reads live cluster state)
 
 ## Setup
 
 ```bash
-virtualenv -p python3 virtualenv
-source virtualenv/bin/activate
-pip install -r requirements.txt
+uv sync
 ```
+
+This creates a `.venv/` virtualenv and installs all dependencies. No separate Python install needed — uv manages that too.
 
 ## Usage
 
 ```bash
-python main.py migrate --name <app-name> --namespace <namespace>
-python main.py migrate --name <app-name> --namespace <namespace> --context <kubeconfig-context>
+uv run python main.py migrate --name <app-name> --namespace <namespace>
+uv run python main.py migrate --name <app-name> --namespace <namespace> --context <kubeconfig-context>
 ```
 
 **Flags:**
@@ -38,13 +38,13 @@ python main.py migrate --name <app-name> --namespace <namespace> --context <kube
 **Example — preview before committing:**
 
 ```bash
-python main.py migrate --name loki --namespace monitoring --dry-run --output loki-flux.yaml
+uv run python main.py migrate --name loki --namespace monitoring --dry-run --output loki-flux.yaml
 ```
 
 **Example — live migration:**
 
 ```bash
-python main.py migrate --name loki --namespace monitoring
+uv run python main.py migrate --name loki --namespace monitoring
 ```
 
 The tool will:
@@ -69,6 +69,6 @@ Config sources (`spec.config`, `spec.userConfig`, `spec.extraConfigs`) are carri
 ## Running tests
 
 ```bash
-./virtualenv/bin/pytest
-./virtualenv/bin/pytest --cov --cov-report=term-missing
+uv run pytest
+uv run pytest --cov --cov-report=term-missing
 ```

@@ -1,3 +1,20 @@
+[project]
+name = "appcr-to-helmrelease-converter"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml==6.0.3",
+    "click==8.3.3",
+    "kubernetes==35.0.0",
+    "rich==15.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

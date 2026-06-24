@@ -129,17 +129,14 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 ## Dev setup
 
 ```bash
-virtualenv -p python3 virtualenv
-source virtualenv/bin/activate
-pip install -r requirements.txt
-pip install -r requirements-test.txt
+uv sync
 ```
 
 ## Running tests
 
 ```bash
-./virtualenv/bin/pytest
-./virtualenv/bin/pytest --cov --cov-report=term-missing
+uv run pytest
+uv run pytest --cov --cov-report=term-missing
 ```
 
 Coverage: branch coverage, 100% required, `if __name__ == '__main__':` excluded. Tests split across `tests/test_values_from.py`, `tests/test_resources.py`, `tests/test_converter.py`, `tests/test_main.py`.
