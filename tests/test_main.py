@@ -9,11 +9,12 @@ from migrator import MigratorError
 from main import cli
 
 
-def _fetch_result(app=None, catalog=None, referenced_configs=None):
+def _fetch_result(app=None, catalog=None, referenced_configs=None, dependency_helm_releases=None):
     return FetchResult(
         app=app or _APP_DICT,
         catalog=catalog or _CATALOG_DICT,
         referenced_configs=referenced_configs or {},
+        dependency_helm_releases=dependency_helm_releases or {},
     )
 
 
@@ -328,6 +329,22 @@ class TestMigrateCommand:
         with patch("fetcher.fetch", return_value=_fetch_result(app=_APP_WITH_NAMESPACE_CONFIG)):
             result = self._run(self._args(), input_text="n\n")
         assert "warning" in result.output.lower()
+
+    def test_dep_helmrelease_missing_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=_fetch_result(dependency_helm_releases={"coredns": None})):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+
+    def test_dep_helmrelease_missing_shows_error(self):
+        with patch("fetcher.fetch", return_value=_fetch_result(dependency_helm_releases={"coredns": None})):
+            result = self._run(self._args())
+        assert "coredns" in result.output
+
+    def test_dep_info_note_shown_when_deps_present(self):
+        hr = {"metadata": {"name": "coredns"}}
+        with patch("fetcher.fetch", return_value=_fetch_result(dependency_helm_releases={"coredns": hr})):
+            result = self._run(self._args(), input_text="n\n")
+        assert "existence only" in result.output
 
     def _apply_failing_api(self):
         api = MagicMock()

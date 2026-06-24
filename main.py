@@ -90,13 +90,18 @@ def migrate_cmd(name, namespace, context, dry_run, output_file):
     _dump_highlighted(_to_yaml_str([_strip_server_fields(app)]))
 
     _section("Preflight checks")
-    issues = run_preflight(app, catalog, result.referenced_configs)
+    issues = run_preflight(app, catalog, result.referenced_configs, result.dependency_helm_releases)
     warnings = [i for i in issues if not isinstance(i, PreflightError)]
     errors = [i for i in issues if isinstance(i, PreflightError)]
     for issue in warnings + errors:
         click.echo(issue.display(), err=True)
     if errors:
         raise SystemExit(1)
+    if result.dependency_helm_releases:
+        click.echo(
+            "ℹ️  Dependency check verifies existence only — readiness is enforced by Flux at runtime",
+            err=True,
+        )
     if not issues:
         click.echo("No issues found")
     else:

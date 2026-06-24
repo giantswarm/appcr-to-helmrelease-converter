@@ -2,6 +2,7 @@ from preflight import (
     PreflightError,
     PreflightIssue,
     PreflightWarning,
+    check_dependency_helm_releases,
     check_empty_values_from_names,
     check_flux_managed,
     check_kube_config,
@@ -359,3 +360,42 @@ class TestRunPreflight:
     def test_flux_managed_warning_surfaced_by_run_preflight(self):
         issues = run_preflight(_APP_FLUX_MANAGED, _CATALOG_OCI)
         assert any("gitops" in str(i) for i in issues)
+
+
+_DEP_APP = {"metadata": {"namespace": "giantswarm"}, "spec": {}}
+_HR_FOUND = {"metadata": {"name": "coredns"}}
+
+
+class TestCheckDependencyHelmReleases:
+    def test_no_deps_no_errors(self):
+        assert check_dependency_helm_releases(_DEP_APP, {}, {}) == []
+
+    def test_dep_found_no_errors(self):
+        assert check_dependency_helm_releases(_DEP_APP, {}, {"coredns": _HR_FOUND}) == []
+
+    def test_dep_missing_is_preflight_error(self):
+        issues = check_dependency_helm_releases(_DEP_APP, {}, {"coredns": None})
+        assert len(issues) == 1
+        assert isinstance(issues[0], PreflightError)
+
+    def test_error_names_missing_helmrelease(self):
+        issues = check_dependency_helm_releases(_DEP_APP, {}, {"coredns": None})
+        assert "coredns" in str(issues[0])
+
+    def test_error_names_namespace(self):
+        issues = check_dependency_helm_releases(_DEP_APP, {}, {"coredns": None})
+        assert "giantswarm" in str(issues[0])
+
+    def test_multiple_missing_one_error_each(self):
+        issues = check_dependency_helm_releases(_DEP_APP, {}, {"coredns": None, "prometheus": None})
+        assert len(issues) == 2
+
+    def test_mixed_found_and_missing(self):
+        issues = check_dependency_helm_releases(_DEP_APP, {}, {"coredns": _HR_FOUND, "prometheus": None})
+        assert len(issues) == 1
+        assert "prometheus" in str(issues[0])
+
+    def test_surfaced_by_run_preflight(self):
+        app = {"metadata": {"name": "my-app", "namespace": "giantswarm"}, "spec": {}}
+        issues = run_preflight(app, _EMPTY_CATALOG, dependency_helm_releases={"coredns": None})
+        assert any(isinstance(i, PreflightError) and "coredns" in str(i) for i in issues)

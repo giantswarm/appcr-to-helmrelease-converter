@@ -87,6 +87,37 @@ class TestBuildHelmRelease:
     def test_upgrade_remediation_strategy_rollback(self):
         assert build_helm_release(_app())["spec"]["upgrade"]["remediation"]["strategy"] == "rollback"
 
+    def test_depends_on_single(self):
+        result = build_helm_release(_app(annotations={"app-operator.giantswarm.io/depends-on": "coredns"}))
+        assert result["spec"]["dependsOn"] == [{"name": "coredns"}]
+
+    def test_depends_on_multiple(self):
+        result = build_helm_release(_app(annotations={"app-operator.giantswarm.io/depends-on": "coredns,prometheus"}))
+        assert result["spec"]["dependsOn"] == [{"name": "coredns"}, {"name": "prometheus"}]
+
+    def test_depends_on_whitespace_tolerated(self):
+        result = build_helm_release(_app(annotations={"app-operator.giantswarm.io/depends-on": "coredns, prometheus"}))
+        assert result["spec"]["dependsOn"] == [{"name": "coredns"}, {"name": "prometheus"}]
+
+    def test_depends_on_empty_entries_filtered(self):
+        result = build_helm_release(_app(annotations={"app-operator.giantswarm.io/depends-on": "coredns,,prometheus"}))
+        assert result["spec"]["dependsOn"] == [{"name": "coredns"}, {"name": "prometheus"}]
+
+    def test_depends_on_absent_means_no_depends_on_in_spec(self):
+        assert "dependsOn" not in build_helm_release(_app())["spec"]
+
+    def test_depends_on_annotation_stripped_from_metadata(self):
+        result = build_helm_release(_app(annotations={"app-operator.giantswarm.io/depends-on": "coredns"}))
+        assert "app-operator.giantswarm.io/depends-on" not in result["metadata"].get("annotations", {})
+
+    def test_depends_on_helmrelease_annotation_stripped_from_metadata(self):
+        result = build_helm_release(_app(annotations={"app-operator.giantswarm.io/depends-on-helmrelease": "true"}))
+        assert "annotations" not in result["metadata"]
+
+    def test_depends_on_appears_before_install_in_spec(self):
+        result = build_helm_release(_app(annotations={"app-operator.giantswarm.io/depends-on": "coredns"}))
+        assert list(result["spec"].keys())[0] == "dependsOn"
+
     def test_no_annotations_when_app_has_none(self):
         assert "annotations" not in build_helm_release(_app())["metadata"]
 

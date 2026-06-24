@@ -84,6 +84,18 @@ def check_multiple_helm_repos(app: dict, catalog: dict) -> list[PreflightIssue]:
     return []
 
 
+def check_dependency_helm_releases(app: dict, catalog: dict, dependency_helm_releases: dict) -> list[PreflightIssue]:
+    ns = app.get("metadata", {}).get("namespace", "")
+    return [
+        PreflightError(
+            f'HelmRelease "{name}" not found in namespace "{ns}"; '
+            "ensure all dependencies are migrated before migrating this app"
+        )
+        for name, hr in dependency_helm_releases.items()
+        if hr is None
+    ]
+
+
 def check_missing_referenced_configs(app: dict, catalog: dict, referenced_configs: dict) -> list[PreflightIssue]:
     return [
         PreflightError(f"{kind} \"{name}\" not found in namespace \"{ns}\"")
@@ -128,9 +140,16 @@ _REFS_CHECKS = [
 ]
 
 
-def run_preflight(app: dict, catalog: dict, referenced_configs: dict | None = None) -> list[PreflightIssue]:
+def run_preflight(
+    app: dict,
+    catalog: dict,
+    referenced_configs: dict | None = None,
+    dependency_helm_releases: dict | None = None,
+) -> list[PreflightIssue]:
     refs = referenced_configs or {}
+    deps = dependency_helm_releases or {}
     return (
         [issue for check in _CHECKS for issue in check(app, catalog)]
         + [issue for check in _REFS_CHECKS for issue in check(app, catalog, refs)]
+        + check_dependency_helm_releases(app, catalog, deps)
     )

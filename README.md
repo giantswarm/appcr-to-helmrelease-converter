@@ -50,7 +50,7 @@ python main.py migrate --name loki --namespace monitoring
 The tool will:
 
 1. Fetch the App CR and its Catalog CR from the cluster
-2. Run preflight checks and print any warnings
+2. Run preflight checks — including verifying that any `depends-on` dependencies exist as HelmReleases — and print any warnings
 3. Resolve `valuesKey` for each ConfigMap/Secret referenced by the app — prompts you to choose when a resource has multiple data keys
 4. Show you the generated Flux YAML (and save it if `--output` is set), then ask for confirmation
 5. Suspend the App CR (and its Chart CR on the workload cluster if applicable)
@@ -65,6 +65,8 @@ Depending on the Catalog type:
 - **Helm catalog** → `HelmRepository` + `HelmRelease`
 
 Config sources (`spec.config`, `spec.userConfig`, `spec.extraConfigs`) are carried over as `valuesFrom` entries on the HelmRelease, with priorities preserved. Flux- and GS-specific labels and annotations are filtered out of the output.
+
+If the App CR carries `app-operator.giantswarm.io/depends-on`, the converted HelmRelease will have a `spec.dependsOn` list. The preflight check verifies that each referenced dependency HelmRelease exists — existence only, not readiness. Flux enforces ordering and waits for dependencies to become Ready at runtime.
 
 ## Running tests
 

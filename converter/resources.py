@@ -86,6 +86,8 @@ _SERVICE_ACCOUNT_EXCLUDED_NAMESPACES = {"giantswarm", "flux-giantswarm", "monito
 
 
 _ANNOTATION_BLOCKLIST = {
+    "app-operator.giantswarm.io/depends-on",
+    "app-operator.giantswarm.io/depends-on-helmrelease",
     "app-operator.giantswarm.io/latest-configmap-version",
     "app-operator.giantswarm.io/latest-secret-version",
     "app-operator.giantswarm.io/paused",
@@ -98,6 +100,35 @@ _LABEL_BLOCKLIST = {
 
 
 def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
+    depends_on_raw = app["metadata"].get("annotations", {}).get(
+        "app-operator.giantswarm.io/depends-on", ""
+    )
+    depends_on = [n.strip() for n in depends_on_raw.split(",") if n.strip()]
+
+    spec_items = []
+    if depends_on:
+        spec_items.append(("dependsOn", [{"name": n} for n in depends_on]))
+    spec_items += [
+        ("install", OrderedDict([
+            ("remediation", OrderedDict([
+                ("remediateLastFailure", False),
+                ("retries", 10),
+            ]))
+        ])),
+        ("interval", "5m"),
+        ("releaseName", _release_name(app)),
+        ("storageNamespace", app["spec"]["namespace"]),
+        ("targetNamespace", app["spec"]["namespace"]),
+        ("timeout", "10m"),
+        ("upgrade", OrderedDict([
+            ("remediation", OrderedDict([
+                ("remediateLastFailure", True),
+                ("retries", 10),
+                ("strategy", "rollback"),
+            ]))
+        ])),
+    ]
+
     hr = OrderedDict([
         ("apiVersion", "helm.toolkit.fluxcd.io/v2"),
         ("kind", "HelmRelease"),
@@ -105,26 +136,7 @@ def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
             ("name", app["metadata"]["name"]),
             ("namespace", app["metadata"]["namespace"]),
         ])),
-        ("spec", OrderedDict([
-            ("install", OrderedDict([
-                ("remediation", OrderedDict([
-                    ("remediateLastFailure", False),
-                    ("retries", 10),
-                ]))
-            ])),
-            ("interval", "5m"),
-            ("releaseName", _release_name(app)),
-            ("storageNamespace", app["spec"]["namespace"]),
-            ("targetNamespace", app["spec"]["namespace"]),
-            ("timeout", "10m"),
-            ("upgrade", OrderedDict([
-                ("remediation", OrderedDict([
-                    ("remediateLastFailure", True),
-                    ("retries", 10),
-                    ("strategy", "rollback"),
-                ]))
-            ])),
-        ]))
+        ("spec", OrderedDict(spec_items)),
     ])
 
     annotations = OrderedDict(

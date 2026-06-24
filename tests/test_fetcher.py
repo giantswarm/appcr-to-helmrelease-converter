@@ -35,9 +35,27 @@ CATALOG_DICT = {
 }
 
 
-def _mock_api(app_dict=APP_DICT, catalog_dict=CATALOG_DICT):
+_HR_DICT = {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
+            "metadata": {"name": "coredns", "namespace": "giantswarm"}}
+
+
+def _mock_api(app_dict=APP_DICT, catalog_dict=CATALOG_DICT, helm_releases=None):
     api = MagicMock()
-    api.get_namespaced_custom_object.side_effect = [app_dict, catalog_dict]
+    hrs = helm_releases or {}
+
+    def _get(group, version, namespace, plural, name):
+        if plural == "apps":
+            return app_dict
+        if plural == "catalogs":
+            return catalog_dict
+        if plural == "helmreleases":
+            hr = hrs.get(name)
+            if hr is None:
+                raise ApiException(status=404)
+            return hr
+        raise ApiException(status=404)
+
+    api.get_namespaced_custom_object.side_effect = _get
     return api
 
 
@@ -318,6 +336,54 @@ class TestFetchReferencedConfigs:
              patch("kubernetes.client.CoreV1Api", return_value=core_api):
             with pytest.raises(FetchError):
                 fetch("my-app", self._NS)
+
+
+_APP_WITH_DEPS = {
+    **APP_DICT,
+    "metadata": {**APP_DICT["metadata"], "annotations": {"app-operator.giantswarm.io/depends-on": "coredns"}},
+}
+
+
+class TestFetchDependencyHelmReleases:
+    def test_no_depends_on_annotation_yields_empty_dict(self):
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=_mock_api()), \
+             patch("kubernetes.client.CoreV1Api"):
+            result = fetch("my-app", "giantswarm")
+        assert result.dependency_helm_releases == {}
+
+    def test_dep_found_included_in_result(self):
+        api = _mock_api(app_dict=_APP_WITH_DEPS, helm_releases={"coredns": _HR_DICT})
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=api), \
+             patch("kubernetes.client.CoreV1Api"):
+            result = fetch("my-app", "giantswarm")
+        assert result.dependency_helm_releases == {"coredns": _HR_DICT}
+
+    def test_dep_not_found_stored_as_none(self):
+        api = _mock_api(app_dict=_APP_WITH_DEPS, helm_releases={})
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=api), \
+             patch("kubernetes.client.CoreV1Api"):
+            result = fetch("my-app", "giantswarm")
+        assert result.dependency_helm_releases == {"coredns": None}
+
+    def test_non_404_error_on_dep_lookup_raises_fetch_error(self):
+        api = MagicMock()
+
+        def _get(group, version, namespace, plural, name):
+            if plural == "apps":
+                return _APP_WITH_DEPS
+            if plural == "catalogs":
+                return CATALOG_DICT
+            raise ApiException(status=403)
+
+        api.get_namespaced_custom_object.side_effect = _get
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=api), \
+             patch("kubernetes.client.CoreV1Api"):
+            with pytest.raises(FetchError):
+                fetch("my-app", "giantswarm")
 
 
 class TestFetchAppCrCoordinates:

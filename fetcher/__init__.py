@@ -15,6 +15,7 @@ class FetchResult:
     app: dict
     catalog: dict
     referenced_configs: dict = field(default_factory=dict)
+    dependency_helm_releases: dict = field(default_factory=dict)
 
 
 def _api_message(e: ApiException) -> str:
@@ -69,7 +70,36 @@ def fetch(name: str, namespace: str, context: str | None = None) -> FetchResult:
 
     core_api = client.CoreV1Api()
     referenced_configs = _fetch_referenced_configs(app, core_api)
-    return FetchResult(app=app, catalog=catalog, referenced_configs=referenced_configs)
+    dependency_helm_releases = _fetch_dependency_helm_releases(api, app, namespace)
+    return FetchResult(
+        app=app,
+        catalog=catalog,
+        referenced_configs=referenced_configs,
+        dependency_helm_releases=dependency_helm_releases,
+    )
+
+
+def _fetch_dependency_helm_releases(api, app: dict, namespace: str) -> dict:
+    raw = (app.get("metadata") or {}).get("annotations", {}).get(
+        "app-operator.giantswarm.io/depends-on", ""
+    )
+    names = [n.strip() for n in raw.split(",") if n.strip()]
+    result = {}
+    for name in names:
+        try:
+            result[name] = api.get_namespaced_custom_object(
+                group="helm.toolkit.fluxcd.io",
+                version="v2",
+                namespace=namespace,
+                plural="helmreleases",
+                name=name,
+            )
+        except ApiException as e:
+            if e.status == 404:
+                result[name] = None
+            else:
+                raise FetchError(f"failed to fetch HelmRelease {namespace}/{name}: {_api_message(e)}") from e
+    return result
 
 
 def iter_refs(app: dict):
