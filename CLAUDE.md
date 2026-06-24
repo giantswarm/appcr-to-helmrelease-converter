@@ -124,6 +124,8 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **13. Preflight warnings for OCI fallback and Flux-managed App CRs** ✓ _Implemented:_ Two new `PreflightWarning` checks in `preflight/__init__.py`: `check_oci_fallback` warns when catalog has no OCI type (converter will use HelmRepository path); `check_flux_managed` warns when App CR carries kustomize labels, instructing the operator to commit converted resources to gitops, remove the App CR from gitops, and manually strip finalizers `operatorkit.giantswarm.io/app-operator-app` (App CR) and `operatorkit.giantswarm.io/chart-operator-chart` (Chart CR). See ADR 0018.
 
+**14. `--dry-run` and `--output FILENAME` flags for migrate** ✓ _Implemented: Two orthogonal flags on `migrate_cmd`. `--dry-run` (`is_flag=True`): prints `✅ Dry run complete — halting before live migration.` and exits 0 after displaying generated Flux resources, before the confirm prompt; all read-only steps (Fetch, Preflight, Resolve, Convert) still run. `--output FILENAME` (`click.Path(writable=True, dir_okay=False)`): serializes docs to plain multi-doc YAML once (reusing the cached `yaml_str`), writes to file, prints `✅ Conversion result saved to FILENAME!` with a leading blank line; runs before the dry-run exit so the combination writes the file and exits cleanly. See ADR 0019._
+
 ## Dev setup
 
 ```bash

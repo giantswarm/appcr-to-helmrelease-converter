@@ -358,6 +358,68 @@ class TestMigrateCommand:
             result = self._run(self._args(), input_text="y\nn\n")
         assert "Skipping revert" in result.output
 
+    def test_dry_run_exits_zero_without_input(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--dry-run"])
+        assert result.exit_code == 0
+
+    def test_dry_run_does_not_show_confirm_section(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--dry-run"])
+        assert "Confirm" not in result.output
+
+    def test_dry_run_shows_halt_message(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--dry-run"])
+        assert "✅ Dry run complete" in result.output
+
+    def test_dry_run_does_not_call_load_client(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
+             patch("migrator.load_client") as mock_load:
+            self._run(self._args() + ["--dry-run"])
+        mock_load.assert_not_called()
+
+    def test_dry_run_still_displays_generated_flux_resources(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--dry-run"])
+        assert "kind: HelmRelease" in result.output
+
+    def test_dry_run_preflight_error_still_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=_fetch_result(app=_APP_WITH_KUBECONFIG_MISMATCH)):
+            result = self._run(self._args() + ["--dry-run"])
+        assert result.exit_code != 0
+
+    def test_output_file_contains_helm_release(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch("fetcher.fetch", return_value=_fetch_result()):
+                runner.invoke(cli, ["migrate"] + self._args() + ["--output", "out.yaml"], input="n\n")
+            with open("out.yaml") as f:
+                docs = list(yaml.safe_load_all(f))
+        assert any(d.get("kind") == "HelmRelease" for d in docs if d)
+
+    def test_output_file_save_message_shown(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch("fetcher.fetch", return_value=_fetch_result()):
+                result = runner.invoke(cli, ["migrate"] + self._args() + ["--output", "out.yaml"], input="n\n")
+        assert "✅ Conversion result saved to out.yaml!" in result.output
+
+    def test_dry_run_with_output_writes_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch("fetcher.fetch", return_value=_fetch_result()):
+                result = runner.invoke(cli, ["migrate"] + self._args() + ["--dry-run", "--output", "out.yaml"])
+            assert result.exit_code == 0
+            with open("out.yaml") as f:
+                docs = list(yaml.safe_load_all(f))
+        assert any(d.get("kind") == "HelmRelease" for d in docs if d)
+
+    def test_output_bad_path_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--output", "/"])
+        assert result.exit_code != 0
+
 
 class TestStripServerFields:
     def setup_method(self):

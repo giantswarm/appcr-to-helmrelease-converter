@@ -54,9 +54,9 @@ def _to_yaml_str(docs) -> str:
     return "---\n" + buf.getvalue()
 
 
-def _dump_highlighted(docs):
+def _dump_highlighted(yaml_str: str):
     Console(file=sys.stdout, highlight=False).print(
-        Syntax(_to_yaml_str(docs), "yaml", theme="monokai", word_wrap=True)
+        Syntax(yaml_str, "yaml", theme="monokai", word_wrap=True)
     )
 
 
@@ -75,7 +75,9 @@ def _section(title: str) -> None:
 @click.option("--name", required=True)
 @click.option("--namespace", required=True)
 @click.option("--context", "context", default=None)
-def migrate_cmd(name, namespace, context):
+@click.option("--dry-run", is_flag=True, default=False)
+@click.option("--output", "output_file", type=click.Path(writable=True, dir_okay=False), default=None)
+def migrate_cmd(name, namespace, context, dry_run, output_file):
     _section("Fetch")
     click.echo(f'Fetching "{name}" from namespace "{namespace}"...')
     try:
@@ -85,7 +87,7 @@ def migrate_cmd(name, namespace, context):
         click.echo(f"❌ {e}", err=True)
         raise SystemExit(1)
     app, catalog = result.app, result.catalog
-    _dump_highlighted([_strip_server_fields(app)])
+    _dump_highlighted(_to_yaml_str([_strip_server_fields(app)]))
 
     _section("Preflight checks")
     issues = run_preflight(app, catalog, result.referenced_configs)
@@ -105,7 +107,17 @@ def migrate_cmd(name, namespace, context):
 
     _section("Generated Flux resources")
     docs = convert(app, catalog, resolution)
-    _dump_highlighted(docs)
+    yaml_str = _to_yaml_str(docs)
+    _dump_highlighted(yaml_str)
+
+    if output_file:
+        with open(output_file, "w") as f:
+            f.write(yaml_str)
+        click.echo(f"\n✅ Conversion result saved to {output_file}!")
+
+    if dry_run:
+        click.echo("\n✅ Dry run complete — halting before live migration.")
+        raise SystemExit(0)
 
     _section("Confirm")
     if not click.confirm("Proceed with live migration?"):

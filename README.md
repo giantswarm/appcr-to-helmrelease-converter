@@ -25,7 +25,23 @@ python main.py migrate --name <app-name> --namespace <namespace>
 python main.py migrate --name <app-name> --namespace <namespace> --context <kubeconfig-context>
 ```
 
-**Example:**
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--name` | Name of the App CR (required) |
+| `--namespace` | Namespace of the App CR (required) |
+| `--context` | kubeconfig context to use (default: current context) |
+| `--dry-run` | Stop after showing the generated Flux YAML — no cluster mutations |
+| `--output FILE` | Write the generated Flux YAML to a file (independent of `--dry-run`) |
+
+**Example — preview before committing:**
+
+```bash
+python main.py migrate --name loki --namespace monitoring --dry-run --output loki-flux.yaml
+```
+
+**Example — live migration:**
 
 ```bash
 python main.py migrate --name loki --namespace monitoring
@@ -36,7 +52,7 @@ The tool will:
 1. Fetch the App CR and its Catalog CR from the cluster
 2. Run preflight checks and print any warnings
 3. Resolve `valuesKey` for each ConfigMap/Secret referenced by the app — prompts you to choose when a resource has multiple data keys
-4. Show you the generated Flux YAML and ask for confirmation
+4. Show you the generated Flux YAML (and save it if `--output` is set), then ask for confirmation
 5. Suspend the App CR (and its Chart CR on the workload cluster if applicable)
 6. Apply the new Flux resources to the cluster
 7. Watch the HelmRelease until it becomes ready — on failure, asks whether to roll back
