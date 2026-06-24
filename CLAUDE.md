@@ -118,7 +118,7 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **10. Collapse to single `migrate` command** ✓ _Implemented: removed `convert`, `fetch`, `fetch-and-convert` commands, helpers (`_identify_docs`, `_dump`, `_check_and_emit`), and their tests. `migrate` Fetch section now displays the stripped App CR YAML. `fetcher/` package retained. See ADR 0015._
 
-**11. Resolver layer with interactive valuesKey selection** _(not started)_ New `resolver/` package: iterates all ConfigMap/Secret refs from `spec.extraConfigs`, `spec.config`, `spec.userConfig`; looks each up via `CoreV1Api` in `app.metadata.namespace`; resolves `valuesKey` from actual data keys (single key → auto; multiple keys → interactive prompt; `values.yaml` → `None` to omit). `Resolution` dataclass with `key_overrides: dict[tuple[str, str], str | None]` passed into `converter.convert()` and `calculate_values_from()` as optional parameter (fallback to hardcoded defaults when `None`). New cross-namespace valuesFrom preflight check errors if any ref has a `namespace` differing from `app.metadata.namespace`. Wired between preflight and convert in `migrate`. See ADR 0016.
+**11. Resolver layer with interactive valuesKey selection** ✓ _Implemented: `resolver/` package iterates all ConfigMap/Secret refs, looks each up via `CoreV1Api`, resolves `valuesKey` from actual data keys (single → auto; multiple → interactive prompt; `values.yaml` → `None` to omit). `Resolution` dataclass passed into `converter.convert()`. Cross-namespace valuesFrom preflight check. Wired between preflight and convert in `migrate`. See ADR 0016._
 
 ## Dev setup
 
