@@ -108,6 +108,31 @@ class TestBuildHelmRelease:
         }))
         assert result["metadata"]["annotations"] == {"keep.me/key": "val"}
 
+    def test_latest_configmap_version_annotation_removed(self):
+        result = build_helm_release(_app(annotations={
+            "app-operator.giantswarm.io/latest-configmap-version": "abc123",
+        }))
+        assert "annotations" not in result["metadata"]
+
+    def test_latest_secret_version_annotation_removed(self):
+        result = build_helm_release(_app(annotations={
+            "app-operator.giantswarm.io/latest-secret-version": "abc123",
+        }))
+        assert "annotations" not in result["metadata"]
+
+    def test_flux_annotation_removed(self):
+        result = build_helm_release(_app(annotations={
+            "kustomize.toolkit.fluxcd.io/name": "my-kustomization",
+        }))
+        assert "annotations" not in result["metadata"]
+
+    def test_non_flux_annotation_kept_when_mixed_with_flux(self):
+        result = build_helm_release(_app(annotations={
+            "custom.io/key": "value",
+            "kustomize.toolkit.fluxcd.io/name": "my-kustomization",
+        }))
+        assert result["metadata"]["annotations"] == {"custom.io/key": "value"}
+
     def test_no_labels_when_app_has_none(self):
         assert "labels" not in build_helm_release(_app())["metadata"]
 
@@ -117,6 +142,12 @@ class TestBuildHelmRelease:
 
     def test_blocked_label_removed(self):
         result = build_helm_release(_app(labels={"app-operator.giantswarm.io/version": "1.0.0"}))
+        assert "labels" not in result["metadata"]
+
+    def test_flux_label_removed(self):
+        result = build_helm_release(_app(labels={
+            "kustomize.toolkit.fluxcd.io/namespace": "my-namespace",
+        }))
         assert "labels" not in result["metadata"]
 
     def test_no_kube_config_when_spec_kube_config_absent(self):

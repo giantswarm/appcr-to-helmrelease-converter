@@ -120,6 +120,8 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **11. Resolver layer with interactive valuesKey selection** ✓ _Implemented: `resolver/` package iterates all ConfigMap/Secret refs, looks each up via `CoreV1Api`, resolves `valuesKey` from actual data keys (single → auto; multiple → interactive prompt; `values.yaml` → `None` to omit). `Resolution` dataclass passed into `converter.convert()`. Cross-namespace valuesFrom preflight check. Wired between preflight and convert in `migrate`. See ADR 0016._
 
+**12. Filter Flux labels and annotations by prefix** ✓ _Implemented: `fluxcd.io/` substring filter on both annotations and labels in `_build_helm_release_common()`. GS-specific blocklist extended with `app-operator.giantswarm.io/latest-configmap-version` and `app-operator.giantswarm.io/latest-secret-version`. See ADR 0017._
+
 ## Dev setup
 
 ```bash

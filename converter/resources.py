@@ -86,8 +86,10 @@ _SERVICE_ACCOUNT_EXCLUDED_NAMESPACES = {"giantswarm", "flux-giantswarm", "monito
 
 
 _ANNOTATION_BLOCKLIST = {
-    "chart-operator.giantswarm.io/force-helm-upgrade",
+    "app-operator.giantswarm.io/latest-configmap-version",
+    "app-operator.giantswarm.io/latest-secret-version",
     "app-operator.giantswarm.io/paused",
+    "chart-operator.giantswarm.io/force-helm-upgrade",
 }
 
 _LABEL_BLOCKLIST = {
@@ -127,14 +129,14 @@ def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
 
     annotations = OrderedDict(
         (k, v) for k, v in app["metadata"].get("annotations", {}).items()
-        if k not in _ANNOTATION_BLOCKLIST
+        if k not in _ANNOTATION_BLOCKLIST and "fluxcd.io/" not in k
     )
     if annotations:
         hr["metadata"]["annotations"] = annotations
 
     labels = OrderedDict(
         (k, v) for k, v in app["metadata"].get("labels", {}).items()
-        if k not in _LABEL_BLOCKLIST
+        if k not in _LABEL_BLOCKLIST and "fluxcd.io/" not in k
     )
     if labels:
         hr["metadata"]["labels"] = labels
