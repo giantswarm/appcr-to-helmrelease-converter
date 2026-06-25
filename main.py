@@ -98,8 +98,10 @@ def migrate_cmd(name, namespace, context, dry_run, output_file):
     if errors:
         raise SystemExit(1)
     if result.dependency_helm_releases:
+        ns = app.get("metadata", {}).get("namespace", "")
+        checked = ", ".join(f"{ns}/{name}" for name in result.dependency_helm_releases)
         click.echo(
-            "ℹ️  Dependency check verifies existence only — readiness is enforced by Flux at runtime",
+            f"ℹ️  Dependency check passed for HelmRelease `{checked}` based on `app-operator.giantswarm.io/depends-on` annotation of App CR. Verifies existence only — readiness is enforced by Flux at runtime.",
             err=True,
         )
     if not issues:

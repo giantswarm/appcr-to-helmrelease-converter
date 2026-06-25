@@ -345,6 +345,7 @@ class TestMigrateCommand:
         with patch("fetcher.fetch", return_value=_fetch_result(dependency_helm_releases={"coredns": hr})):
             result = self._run(self._args(), input_text="n\n")
         assert "existence only" in result.output
+        assert "giantswarm/coredns" in result.output
 
     def _apply_failing_api(self):
         api = MagicMock()
