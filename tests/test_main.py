@@ -485,7 +485,7 @@ class TestMigrateCommand:
              patch("migrator.monitor_helm_release.time.sleep"), \
              patch("main.delete_app_and_chart") as mock_delete:
             result = self._run(self._args(), input_text="y\ny\n")
-        mock_delete.assert_called_once()
+        mock_delete.assert_called_once_with(mock_api, mock_api, fetch_result.app)
         assert "✅ App CR and Chart CR deleted." in result.output
 
     def test_non_flux_cleanup_failure_exits_nonzero(self):

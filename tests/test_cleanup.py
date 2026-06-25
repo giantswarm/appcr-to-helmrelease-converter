@@ -5,6 +5,7 @@ import pytest
 
 from kubernetes.client.exceptions import ApiException
 
+from migrator import MigratorError
 from migrator.cleanup import delete_app_and_chart, flux_cleanup_message
 
 
@@ -78,7 +79,7 @@ class TestFluxCleanupMessage:
 
     def test_in_cluster_app_has_no_kubeconfig_secret_mention(self):
         msg = flux_cleanup_message(_APP)
-        assert "kubeconfig" not in msg.lower() or "secret" not in msg.lower()
+        assert "kubeconfig" not in msg.lower() and "secret" not in msg.lower()
 
 
 class TestDeleteAppAndChart:
@@ -251,7 +252,6 @@ class TestDeleteAppAndChart:
         assert order == ["chart", "app"]
 
     def test_continues_to_app_cr_when_chart_cr_fails_then_raises_combined(self):
-        from migrator import MigratorError
         app_api, chart_api = self._apis()
         chart_api.delete_namespaced_custom_object.side_effect = ApiException(status=500)
         with patch("migrator.cleanup.time.sleep"):
@@ -262,7 +262,6 @@ class TestDeleteAppAndChart:
         assert "chart" in str(exc_info.value).lower() or "Chart" in str(exc_info.value)
 
     def test_raises_on_poll_timeout_for_chart_cr(self):
-        from migrator import MigratorError
         app_api, chart_api = self._apis()
         # override side_effect so poll never returns 404
         chart_api.get_namespaced_custom_object.side_effect = None
@@ -275,7 +274,6 @@ class TestDeleteAppAndChart:
                 delete_app_and_chart(app_api, chart_api, _APP)
 
     def test_raises_when_app_cr_fetch_fails(self):
-        from migrator import MigratorError
         app_api, chart_api = self._apis()
         app_api.get_namespaced_custom_object.side_effect = ApiException(status=403)
         with patch("migrator.cleanup.time.sleep"):
@@ -283,7 +281,6 @@ class TestDeleteAppAndChart:
                 delete_app_and_chart(app_api, chart_api, _APP)
 
     def test_raises_when_chart_cr_fetch_fails(self):
-        from migrator import MigratorError
         app_api, chart_api = self._apis()
         chart_api.get_namespaced_custom_object.side_effect = ApiException(status=404)
         with patch("migrator.cleanup.time.sleep"):
@@ -291,7 +288,6 @@ class TestDeleteAppAndChart:
                 delete_app_and_chart(app_api, chart_api, _APP)
 
     def test_raises_when_ensure_paused_patch_fails(self):
-        from migrator import MigratorError
         live_app_no_pause = {
             "metadata": {
                 "name": "my-app", "namespace": "giantswarm",
@@ -306,7 +302,6 @@ class TestDeleteAppAndChart:
                 delete_app_and_chart(app_api, chart_api, _APP)
 
     def test_raises_when_finalizer_patch_fails(self):
-        from migrator import MigratorError
         app_api, chart_api = self._apis()
         chart_api.patch_namespaced_custom_object.side_effect = ApiException(status=500)
         with patch("migrator.cleanup.time.sleep"):
@@ -314,7 +309,6 @@ class TestDeleteAppAndChart:
                 delete_app_and_chart(app_api, chart_api, _APP)
 
     def test_raises_on_non_404_poll_error_for_chart_cr(self):
-        from migrator import MigratorError
         app_api, chart_api = self._apis()
         chart_api.get_namespaced_custom_object.side_effect = [
             _CHART_CR,
@@ -325,9 +319,33 @@ class TestDeleteAppAndChart:
                 delete_app_and_chart(app_api, chart_api, _APP)
 
     def test_raises_when_app_cr_deletion_fails(self):
-        from migrator import MigratorError
         app_api, chart_api = self._apis()
         app_api.delete_namespaced_custom_object.side_effect = ApiException(status=500)
         with patch("migrator.cleanup.time.sleep"):
             with pytest.raises(MigratorError, match="failed to delete"):
+                delete_app_and_chart(app_api, chart_api, _APP)
+
+    def test_raises_when_chart_ensure_paused_patch_fails(self):
+        live_chart_no_pause = {
+            "metadata": {
+                "name": "my-app", "namespace": "giantswarm",
+                "annotations": {},
+                "finalizers": ["operatorkit.giantswarm.io/chart-operator-chart"],
+            },
+        }
+        app_api, chart_api = self._apis(chart_cr=live_chart_no_pause)
+        chart_api.patch_namespaced_custom_object.side_effect = ApiException(status=500)
+        with patch("migrator.cleanup.time.sleep"):
+            with pytest.raises(MigratorError, match="failed to re-apply"):
+                delete_app_and_chart(app_api, chart_api, _APP)
+
+    def test_raises_on_poll_timeout_for_app_cr(self):
+        app_api, chart_api = self._apis()
+        app_api.get_namespaced_custom_object.side_effect = None
+        app_api.get_namespaced_custom_object.return_value = _APP_CR_LIVE
+        import migrator.cleanup as m
+        with patch("migrator.cleanup.time.sleep"), \
+             patch.object(m, "_POLL_TIMEOUT_S", 10), \
+             patch.object(m, "_POLL_INTERVAL_S", 5):
+            with pytest.raises(MigratorError, match="timed out"):
                 delete_app_and_chart(app_api, chart_api, _APP)

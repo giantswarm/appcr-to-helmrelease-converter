@@ -4,6 +4,7 @@ from kubernetes.client.exceptions import ApiException
 from . import (
     MigrationStep,
     MigratorError,
+    _CHART_NAMESPACE,
     _CHART_PAUSED_ANNOTATION,
     _CHART_PLURAL,
     _GROUP,
@@ -11,8 +12,6 @@ from . import (
     _api_message,
     chart_cr_name,
 )
-
-_CHART_NAMESPACE = "giantswarm"
 
 
 class SuspendChart(MigrationStep):

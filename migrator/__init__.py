@@ -14,8 +14,12 @@ _CHART_PLURAL = "charts"
 _HR_GROUP = "helm.toolkit.fluxcd.io"
 _HR_VERSION = "v2"
 _HR_PLURAL = "helmreleases"
+_CHART_NAMESPACE = "giantswarm"
+_APP_PAUSED_ANNOTATION = "app-operator.giantswarm.io/paused"
 _CHART_PAUSED_ANNOTATION = "chart-operator.giantswarm.io/paused"
 _CLUSTER_LABEL = "giantswarm.io/cluster"
+_POLL_INTERVAL_S = 5
+_POLL_TIMEOUT_S = 300
 
 _FLUX_NAME_LABEL = "kustomize.toolkit.fluxcd.io/name"
 _FLUX_NS_LABEL = "kustomize.toolkit.fluxcd.io/namespace"

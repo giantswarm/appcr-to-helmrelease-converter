@@ -183,8 +183,8 @@ def migrate_cmd(name, namespace, context, dry_run, output_file):
     _section("Clean-up")
     labels = (app.get("metadata") or {}).get("labels") or {}
     is_flux_managed = (
-        "kustomize.toolkit.fluxcd.io/name" in labels
-        and "kustomize.toolkit.fluxcd.io/namespace" in labels
+        migrator._FLUX_NAME_LABEL in labels
+        and migrator._FLUX_NS_LABEL in labels
     )
     if is_flux_managed:
         click.echo(flux_cleanup_message(app))

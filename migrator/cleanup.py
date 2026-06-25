@@ -5,22 +5,21 @@ from kubernetes.client.exceptions import ApiException
 
 from . import (
     MigratorError,
+    _APP_PAUSED_ANNOTATION,
+    _CHART_NAMESPACE,
+    _CHART_PAUSED_ANNOTATION,
     _GROUP,
     _VERSION,
     _PLURAL,
     _CHART_PLURAL,
+    _POLL_INTERVAL_S,
+    _POLL_TIMEOUT_S,
     _api_message,
     chart_cr_name,
 )
 
-_CHART_NAMESPACE = "giantswarm"
 _APP_FINALIZER = "operatorkit.giantswarm.io/app-operator-app"
 _CHART_FINALIZER = "operatorkit.giantswarm.io/chart-operator-chart"
-_APP_PAUSED_ANNOTATION = "app-operator.giantswarm.io/paused"
-_CHART_PAUSED_ANNOTATION = "chart-operator.giantswarm.io/paused"
-
-_POLL_INTERVAL_S = 5
-_POLL_TIMEOUT_S = 300
 
 
 def flux_cleanup_message(app: dict) -> str:
@@ -147,13 +146,11 @@ def delete_app_and_chart(
             f"failed to fetch Chart {_CHART_NAMESPACE}/{chart_name}: {_api_message(e)}"
         ) from e
 
-    _ensure_paused(app_api, _GROUP, _VERSION, namespace, _PLURAL, name, _APP_PAUSED_ANNOTATION, live_app)
-    _ensure_paused(chart_api, _GROUP, _VERSION, _CHART_NAMESPACE, _CHART_PLURAL, chart_name, _CHART_PAUSED_ANNOTATION, live_chart)
-
     errors = []
 
     # Chart CR first
     try:
+        _ensure_paused(chart_api, _GROUP, _VERSION, _CHART_NAMESPACE, _CHART_PLURAL, chart_name, _CHART_PAUSED_ANNOTATION, live_chart)
         _remove_finalizer_and_delete(chart_api, _GROUP, _VERSION, _CHART_NAMESPACE, _CHART_PLURAL, chart_name, _CHART_FINALIZER, live_chart)
         _poll_until_gone(chart_api, _GROUP, _VERSION, _CHART_NAMESPACE, _CHART_PLURAL, chart_name)
     except MigratorError as e:
@@ -161,6 +158,7 @@ def delete_app_and_chart(
 
     # App CR second
     try:
+        _ensure_paused(app_api, _GROUP, _VERSION, namespace, _PLURAL, name, _APP_PAUSED_ANNOTATION, live_app)
         _remove_finalizer_and_delete(app_api, _GROUP, _VERSION, namespace, _PLURAL, name, _APP_FINALIZER, live_app)
         _poll_until_gone(app_api, _GROUP, _VERSION, namespace, _PLURAL, name)
     except MigratorError as e:
