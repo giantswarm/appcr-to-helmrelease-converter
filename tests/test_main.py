@@ -60,6 +60,17 @@ _APP_DICT_WITH_SERVER_FIELDS = {
 }
 
 
+_APP_DICT_FLUX = {
+    **_APP_DICT,
+    "metadata": {
+        **_APP_DICT["metadata"],
+        "labels": {
+            "kustomize.toolkit.fluxcd.io/name": "my-app",
+            "kustomize.toolkit.fluxcd.io/namespace": "flux-system",
+        },
+    },
+}
+
 _APP_WITH_NAMESPACE_CONFIG = {
     **_APP_DICT,
     "spec": {**_APP_DICT["spec"], "namespaceConfig": {"annotations": {"linkerd.io/inject": "enabled"}}},
@@ -136,7 +147,7 @@ class TestMigrateCommand:
              patch("migrator.load_client", return_value=mock_api), \
              patch("migrator.apply_flux_resources.DynamicClient"), \
              patch("migrator.monitor_helm_release.time.sleep"):
-            result = self._run(self._args(), input_text="y\n")
+            result = self._run(self._args(), input_text="y\nN\n")  # y=migrate, N=skip cleanup
         assert result.exit_code == 0
 
     def test_suspend_section_shown(self):
@@ -437,6 +448,56 @@ class TestMigrateCommand:
         with patch("fetcher.fetch", return_value=_fetch_result()):
             result = self._run(self._args() + ["--output", "/"])
         assert result.exit_code != 0
+
+    def _successful_migration_mocks(self, app=None):
+        mock_api = MagicMock()
+        mock_api.get_namespaced_custom_object.return_value = {
+            "metadata": {"annotations": {}, "finalizers": []},
+            "status": {"conditions": [{"type": "Ready", "status": "True", "reason": "InstallSucceeded"}]},
+        }
+        fetch_result = _fetch_result(app=app or _APP_DICT)
+        return mock_api, fetch_result
+
+    def test_cleanup_section_shown_after_successful_migration(self):
+        mock_api, fetch_result = self._successful_migration_mocks()
+        with patch("fetcher.fetch", return_value=fetch_result), \
+             patch("migrator.load_client", return_value=mock_api), \
+             patch("migrator.apply_flux_resources.DynamicClient"), \
+             patch("migrator.monitor_helm_release.time.sleep"):
+            result = self._run(self._args(), input_text="y\n")
+        assert "Clean-up" in result.output
+
+    def test_flux_managed_app_prints_cleanup_instructions(self):
+        mock_api, fetch_result = self._successful_migration_mocks(app=_APP_DICT_FLUX)
+        with patch("fetcher.fetch", return_value=fetch_result), \
+             patch("migrator.load_client", return_value=mock_api), \
+             patch("migrator.apply_flux_resources.DynamicClient"), \
+             patch("migrator.monitor_helm_release.time.sleep"):
+            result = self._run(self._args(), input_text="y\n")
+        assert "operatorkit.giantswarm.io/app-operator-app" in result.output
+        assert "operatorkit.giantswarm.io/chart-operator-chart" in result.output
+
+    def test_non_flux_cleanup_confirmed_deletes_and_shows_success(self):
+        mock_api, fetch_result = self._successful_migration_mocks()
+        with patch("fetcher.fetch", return_value=fetch_result), \
+             patch("migrator.load_client", return_value=mock_api), \
+             patch("migrator.apply_flux_resources.DynamicClient"), \
+             patch("migrator.monitor_helm_release.time.sleep"), \
+             patch("main.delete_app_and_chart") as mock_delete:
+            result = self._run(self._args(), input_text="y\ny\n")
+        mock_delete.assert_called_once()
+        assert "✅ App CR and Chart CR deleted." in result.output
+
+    def test_non_flux_cleanup_failure_exits_nonzero(self):
+        mock_api, fetch_result = self._successful_migration_mocks()
+        with patch("fetcher.fetch", return_value=fetch_result), \
+             patch("migrator.load_client", return_value=mock_api), \
+             patch("migrator.apply_flux_resources.DynamicClient"), \
+             patch("migrator.monitor_helm_release.time.sleep"), \
+             patch("main.delete_app_and_chart", side_effect=MigratorError("delete failed")):
+            result = self._run(self._args(), input_text="y\ny\n")
+        assert result.exit_code != 0
+        assert "delete failed" in result.output
 
 
 class TestStripServerFields:

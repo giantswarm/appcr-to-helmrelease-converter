@@ -13,6 +13,7 @@ import migrator
 import resolver
 from converter import convert
 from fetcher import FetchError
+from migrator.cleanup import delete_app_and_chart, flux_cleanup_message
 from preflight import PreflightError, run_preflight
 
 
@@ -178,6 +179,23 @@ def migrate_cmd(name, namespace, context, dry_run, output_file):
             click.echo(f"ℹ️ {step.skip_message}")
         else:
             click.echo(f"✅ {step.description}")
+
+    _section("Clean-up")
+    labels = (app.get("metadata") or {}).get("labels") or {}
+    is_flux_managed = (
+        "kustomize.toolkit.fluxcd.io/name" in labels
+        and "kustomize.toolkit.fluxcd.io/namespace" in labels
+    )
+    if is_flux_managed:
+        click.echo(flux_cleanup_message(app))
+    else:
+        if click.confirm("Delete App CR and Chart CR?", default=False):
+            try:
+                delete_app_and_chart(api, chart_api, app)
+            except migrator.MigratorError as e:
+                click.echo(f"❌ {e}", err=True)
+                raise SystemExit(1)
+            click.echo("✅ App CR and Chart CR deleted.")
 
 
 cli.add_command(migrate_cmd, name="migrate")

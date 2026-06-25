@@ -13,15 +13,9 @@ python main.py migrate --name my-app --namespace giantswarm --context my-context
 
 ## Intended evolution
 
-### Near term
-
-- Resolver layer: `resolver/` package resolves `valuesKey` from live cluster data; interactive prompt when multiple keys; `Resolution` passed into converter (ADR 0016)
-- Success cleanup (9g): Flux-managed apps print manual deletion instructions; non-Flux-managed apps prompt and delete
-
 ### Longer term
 
 - Diagnostics on migration failure: surface events, helm history, pod status
-- Success cleanup (9g)
 
 ### Containerization
 
@@ -114,7 +108,7 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **9f. Revert** ~~_(not started)_~~ _Obsolete: revert logic is now baked into each `MigrationStep.revert()` + `MigrationRunner.revert_all()` (LIFO). The skip-revert + print manual steps path belongs in the 9e Monitor step or `main.py` error handler. See ADR 0013._
 
-**9g. Success cleanup** _(not started)_ Flux-managed: print instructions to manually delete App CR + Chart CR. Non-Flux-managed: prompt and delete both.
+**9g. Success cleanup** ✓ _Implemented: Clean-up section runs after `MonitorHelmRelease` succeeds. Flux-managed: prints explanation (Kustomization would recreate if deleted before gitops is updated) and kubectl commands to remove finalizers and delete Chart CR then App CR; Chart CR block notes "run against WORKLOAD cluster" with kubeconfig Secret location when remote. Non-Flux-managed: y/N prompt (default N); if confirmed, re-fetches CRs, re-applies paused annotations if missing, deletes Chart CR then App CR (remove finalizer → delete → poll until 404), reports partial failures. Plain function `delete_app_and_chart` + `flux_cleanup_message` in `migrator/cleanup.py`, outside MigrationStep/MigrationRunner. See ADR 0021._
 
 **10. Collapse to single `migrate` command** ✓ _Implemented: removed `convert`, `fetch`, `fetch-and-convert` commands, helpers (`_identify_docs`, `_dump`, `_check_and_emit`), and their tests. `migrate` Fetch section now displays the stripped App CR YAML. `fetcher/` package retained. See ADR 0015._
 
