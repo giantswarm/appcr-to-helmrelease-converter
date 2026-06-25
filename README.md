@@ -55,7 +55,7 @@ The tool will:
 4. Show you the generated Flux YAML (and save it if `--output` is set), then ask for confirmation
 5. Suspend the App CR (and its Chart CR on the workload cluster if applicable)
 6. Apply the new Flux resources to the cluster
-7. Watch the HelmRelease until it becomes ready — on failure, asks whether to roll back
+7. Watch the HelmRelease until it becomes ready — on failure, asks whether to roll back. If any suspend step found the App CR or Chart CR _already_ paused before this run, a note with the matching `kubectl` command is printed so you can undo that state manually if needed
 8. Clean up the now-redundant App CR and Chart CR:
    - **Flux-managed app:** prints the reason and kubectl commands to remove finalizers and delete both CRs (Chart CR first). You must commit the generated Flux resources to your gitops repo and remove the App CR from it _before_ running those commands, otherwise the Kustomization will recreate it.
    - **Non-Flux-managed app:** prompts `y/N` to delete both CRs automatically (Chart CR first, App CR second).
