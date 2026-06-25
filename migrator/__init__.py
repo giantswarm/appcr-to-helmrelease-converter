@@ -45,14 +45,21 @@ class MigrationStep(ABC):
     def skipped(self) -> bool:
         return False
 
+    @property
+    def revert_note(self) -> str | None:
+        return None
+
 
 class MigrationRunner:
     def __init__(self):
         self._stack = []
+        self.revert_notes: list[str] = []
 
     def run(self, step: MigrationStep) -> None:
         step.apply()
         self._stack.append(step)
+        if step.revert_note:
+            self.revert_notes.append(step.revert_note)
 
     def revert_all(self) -> None:
         errors = []

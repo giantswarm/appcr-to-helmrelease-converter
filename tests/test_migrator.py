@@ -48,6 +48,7 @@ _APP_FLUX_RECONCILE_DISABLED = {
 
 class _Stub:
     description = "stub"
+    revert_note = None
     def apply(self): pass
     def revert(self): pass
 
@@ -102,6 +103,22 @@ class TestMigrationRunner:
         runner = MigrationRunner()
         runner.run(step)
         runner.revert_all()  # no exception
+
+    def test_revert_all_collects_non_none_notes(self):
+        step = MagicMock(spec=_Stub)
+        step.revert_note = "fix this manually"
+        runner = MigrationRunner()
+        runner.run(step)
+        runner.revert_all()
+        assert runner.revert_notes == ["fix this manually"]
+
+    def test_revert_all_skips_none_notes(self):
+        step = MagicMock(spec=_Stub)
+        step.revert_note = None
+        runner = MigrationRunner()
+        runner.run(step)
+        runner.revert_all()
+        assert runner.revert_notes == []
 
 
 class TestDisableFluxReconcileApp:
@@ -190,6 +207,27 @@ class TestDisableFluxReconcileApp:
         api.patch_namespaced_custom_object.side_effect = ApiException(status=500)
         with pytest.raises(MigratorError, match="failed to patch App"):
             step.revert()
+
+    def test_revert_note_is_none_for_non_flux_app(self):
+        step = DisableFluxReconcileApp(MagicMock(), _APP)
+        step.apply()
+        step.revert()
+        assert step.revert_note is None
+
+    def test_revert_note_is_none_when_this_run_disabled_reconcile(self):
+        api = MagicMock()
+        step = DisableFluxReconcileApp(api, _APP_FLUX)
+        step.apply()
+        step.revert()
+        assert step.revert_note is None
+
+    def test_revert_note_contains_kubectl_when_reconcile_was_already_disabled(self):
+        step = DisableFluxReconcileApp(MagicMock(), _APP_FLUX_RECONCILE_DISABLED)
+        step.apply()
+        step.revert()
+        assert step.revert_note is not None
+        assert "kubectl label app my-app -n giantswarm" in step.revert_note
+        assert "kustomize.toolkit.fluxcd.io/reconcile-" in step.revert_note
 
 
 class TestSuspendApp:
@@ -284,6 +322,28 @@ class TestSuspendApp:
     def test_description_contains_paused_annotation(self):
         step = SuspendApp(MagicMock(), _APP)
         assert "app-operator.giantswarm.io/paused" in step.description
+
+    def test_revert_note_is_none_when_this_run_set_the_pause(self):
+        api = MagicMock()
+        step = SuspendApp(api, _APP)
+        step.apply()
+        step.revert()
+        assert step.revert_note is None
+
+    def test_revert_note_contains_kubectl_when_pause_was_pre_existing(self):
+        already_paused = {
+            "metadata": {
+                "name": "my-app", "namespace": "giantswarm",
+                "annotations": {"app-operator.giantswarm.io/paused": "true"},
+                "labels": {},
+            },
+        }
+        step = SuspendApp(MagicMock(), already_paused)
+        step.apply()
+        step.revert()
+        assert step.revert_note is not None
+        assert "kubectl annotate app my-app -n giantswarm" in step.revert_note
+        assert "app-operator.giantswarm.io/paused-" in step.revert_note
 
 
 class TestCoreClient:
@@ -454,6 +514,42 @@ class TestSuspendChart:
         api.patch_namespaced_custom_object.side_effect = ApiException(status=500)
         with pytest.raises(MigratorError, match="failed to patch Chart"):
             step.revert()
+
+    def test_revert_note_is_none_when_this_run_set_the_pause(self):
+        api = self._api()
+        step = SuspendChart(api, _APP)
+        step.apply()
+        step.revert()
+        assert step.revert_note is None
+
+    def test_revert_note_contains_kubectl_when_pause_was_pre_existing(self):
+        api = self._api(chart_cr=_CHART_CR_PAUSED)
+        step = SuspendChart(api, _APP)
+        step.apply()
+        step.revert()
+        assert step.revert_note is not None
+        assert "kubectl annotate chart my-app -n giantswarm" in step.revert_note
+        assert "chart-operator.giantswarm.io/paused-" in step.revert_note
+
+    def test_revert_note_includes_kubeconfig_hint_for_wc_app(self):
+        api = self._api(chart_cr=_CHART_CR_PAUSED)
+        step = SuspendChart(api, _APP_REMOTE)
+        step.apply()
+        step.revert()
+        assert step.revert_note is not None
+        assert "my-cluster-kubeconfig" in step.revert_note
+        assert "giantswarm" in step.revert_note
+
+    def test_revert_note_wc_fallback_uses_app_namespace_when_secret_has_no_namespace(self):
+        app_other_ns = {
+            "metadata": {"name": "myapp", "namespace": "org-acme", "annotations": {}, "labels": {}},
+            "spec": {"kubeConfig": {"inCluster": False, "secret": {"name": "my-cluster-kubeconfig"}}},
+        }
+        api = self._api(chart_cr=_CHART_CR_PAUSED)
+        step = SuspendChart(api, app_other_ns)
+        step.apply()
+        step.revert()
+        assert "org-acme/my-cluster-kubeconfig" in step.revert_note
 
     def test_apply_uses_wc_api_for_remote_cluster_chart(self):
         api = self._api()

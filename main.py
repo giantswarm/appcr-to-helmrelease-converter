@@ -174,6 +174,8 @@ def migrate_cmd(name, namespace, context, dry_run, output_file):
                     click.echo("Some changes may need to be reverted manually.", err=True)
             else:
                 click.echo("Skipping revert. Manual steps required to undo changes.", err=True)
+            for note in runner.revert_notes:
+                click.echo(note, err=True)
             raise SystemExit(1)
         if step.skipped:
             click.echo(f"ℹ️ {step.skip_message}")

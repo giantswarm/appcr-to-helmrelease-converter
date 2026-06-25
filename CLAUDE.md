@@ -122,6 +122,8 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **15. `depends-on` annotation → `spec.dependsOn` on HelmRelease** ✓ _Implemented: `app-operator.giantswarm.io/depends-on` (comma-separated names) maps to `spec.dependsOn` entries on the generated HelmRelease; `dependsOn` appears before `install` in spec (alphabetical). Both `depends-on` and `depends-on-helmrelease` annotations stripped from HelmRelease metadata. Preflight verifies each dependency HelmRelease exists in the same namespace (existence only — readiness enforced by Flux at runtime); emits info note to operator. Annotation key shared as `_DEPENDS_ON_ANNOTATION` constant in both `fetcher/` and `converter/`; null-annotation guard (`(annotations or {}).get(...)`) prevents crash on explicit YAML `null`. `dependency_helm_releases: dict` added to `FetchResult`; pre-fetched in `fetcher.fetch()`, passed into `run_preflight` as new param. README updated. See ADR 0020._
 
+**16. Revert note for pre-existing suspend state** ✓ _Implemented: see ADR 0022._ When a suspend step's revert is skipped because `_did_pause` / `_did_disable_reconcile` is `False` and the state was already present before this run, emit a note with a `kubectl` command to undo manually. `MigrationStep` gains `revert_note: str | None`; `MigrationRunner.revert_all()` collects notes into `self.revert_notes`; `main.py` prints them to stderr after the revert block.
+
 ## Dev setup
 
 ```bash

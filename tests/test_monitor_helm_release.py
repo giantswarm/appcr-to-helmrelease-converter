@@ -31,6 +31,10 @@ class TestMonitorHelmRelease:
         step.revert()
         api.assert_not_called()
 
+    def test_revert_note_is_none(self):
+        step = MonitorHelmRelease(MagicMock(), _HR)
+        assert step.revert_note is None
+
     def test_apply_returns_when_already_ready(self):
         api = MagicMock()
         api.get_namespaced_custom_object.return_value = _HR_READY

@@ -19,6 +19,7 @@ class DisableFluxReconcileApp(MigrationStep):
         self._api = api
         self._app = app
         self._did_disable_reconcile = False
+        self._revert_note: str | None = None
         labels = (app.get("metadata", {}).get("labels") or {})
         self._is_flux_managed = _FLUX_NAME_LABEL in labels and _FLUX_NS_LABEL in labels
 
@@ -47,6 +48,10 @@ class DisableFluxReconcileApp(MigrationStep):
         namespace = meta.get("namespace", "")
         labels = meta.get("labels") or {}
         if labels.get(_FLUX_RECONCILE_LABEL) == "disabled":
+            self._revert_note = (
+                f"ℹ️  App CR {namespace}/{name} already had Flux reconcile disabled before this run — not reverted.\n"
+                f"    To re-enable:  kubectl label app {name} -n {namespace} {_FLUX_RECONCILE_LABEL}-"
+            )
             return
         self._did_disable_reconcile = True
         try:
@@ -56,6 +61,10 @@ class DisableFluxReconcileApp(MigrationStep):
             )
         except ApiException as e:
             raise MigratorError(f"failed to patch App {namespace}/{name}: {_api_message(e)}") from e
+
+    @property
+    def revert_note(self) -> str | None:
+        return self._revert_note
 
     def revert(self) -> None:
         if not self._did_disable_reconcile:

@@ -222,6 +222,41 @@ class TestMigrateCommand:
             result = self._run(self._args(), input_text="y\nn\n")
         assert "Skipping revert" in result.output
 
+    def test_revert_notes_printed_when_revert_declined(self):
+        already_paused_app = {
+            **_APP_DICT,
+            "metadata": {
+                **_APP_DICT["metadata"],
+                "annotations": {"app-operator.giantswarm.io/paused": "true"},
+            },
+        }
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = {}
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
+        with patch("fetcher.fetch", return_value=_fetch_result(app=already_paused_app)), \
+             patch("migrator.load_client", return_value=api):
+            result = self._run(self._args(), input_text="y\nn\n")
+        assert "was already paused" in result.output
+        assert "kubectl annotate app" in result.output
+
+    def test_revert_notes_printed_after_revert(self):
+        # App already paused: SuspendApp skips (no patch), SuspendChart fails → revert prints note
+        already_paused_app = {
+            **_APP_DICT,
+            "metadata": {
+                **_APP_DICT["metadata"],
+                "annotations": {"app-operator.giantswarm.io/paused": "true"},
+            },
+        }
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = {}  # SuspendChart GET succeeds
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403)  # SuspendChart PATCH fails
+        with patch("fetcher.fetch", return_value=_fetch_result(app=already_paused_app)), \
+             patch("migrator.load_client", return_value=api):
+            result = self._run(self._args(), input_text="y\ny\n")
+        assert "was already paused" in result.output
+        assert "kubectl annotate app" in result.output
+
     def test_revert_failure_message_printed(self):
         api = MagicMock()
         api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
