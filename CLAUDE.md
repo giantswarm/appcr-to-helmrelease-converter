@@ -140,6 +140,6 @@ pip install -r requirements-test.txt
 ./virtualenv/bin/pytest --cov --cov-report=term-missing
 ```
 
-Coverage: branch coverage, 100% required, `if __name__ == '__main__':` excluded. Tests split across `tests/test_values_from.py`, `tests/test_resources.py`, `tests/test_converter.py`, `tests/test_main.py`, `tests/test_cleanup.py`.
+Coverage: branch coverage, 100% required, `if __name__ == '__main__':` excluded. Tests split across `tests/test_apply_flux_resources.py`, `tests/test_cleanup.py`, `tests/test_converter.py`, `tests/test_fetcher.py`, `tests/test_main.py`, `tests/test_migrator.py`, `tests/test_monitor_helm_release.py`, `tests/test_preflight.py`, `tests/test_resolver.py`, `tests/test_resources.py`, `tests/test_values_from.py`.
 
 **Never run tests against a real Kubernetes cluster.** All code touching the `kubernetes` client must be testable via mocks only. Always patch `kubernetes.config.load_kube_config` and `kubernetes.client.*` in tests. No real kubeconfig loading, no real network calls, no real cluster context.
