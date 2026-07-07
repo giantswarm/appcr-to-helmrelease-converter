@@ -34,6 +34,8 @@ uv run python main.py migrate --name <app-name> --namespace <namespace> --contex
 | `--context` | kubeconfig context to use (default: current context) |
 | `--dry-run` | Stop after showing the generated Flux YAML — no cluster mutations |
 | `--output FILE` | Write the generated Flux YAML to a file (independent of `--dry-run`) |
+| `--assume-yes` / `-y` | Auto-confirm the proceed and revert-on-failure prompts. Never auto-confirms the destructive delete of App/Chart CRs. |
+| `--values-key KIND/NAME=KEY` | Pre-answer the `valuesKey` prompt for a multi-key ConfigMap/Secret (e.g. `ConfigMap/my-cm=values.yaml`). Repeatable. |
 
 **Example — preview before committing:**
 
@@ -47,12 +49,19 @@ uv run python main.py migrate --name loki --namespace monitoring --dry-run --out
 uv run python main.py migrate --name loki --namespace monitoring
 ```
 
+**Example — unattended run** (discover the keys interactively once, then replay):
+
+```bash
+uv run python main.py migrate --name loki --namespace monitoring \
+  --assume-yes --values-key ConfigMap/loki-user-values=values.yaml
+```
+
 The tool will:
 
 1. Fetch the App CR and its Catalog CR from the cluster
 2. Run preflight checks — including verifying that any `depends-on` dependencies exist as HelmReleases — and print any warnings
-3. Resolve `valuesKey` for each ConfigMap/Secret referenced by the app — prompts you to choose when a resource has multiple data keys
-4. Show you the generated Flux YAML (and save it if `--output` is set), then ask for confirmation
+3. Resolve `valuesKey` for each ConfigMap/Secret referenced by the app — prompts you to choose when a resource has multiple data keys (or takes the value from `--values-key`; with `--assume-yes` an unresolved multi-key resource is a hard error naming the flag to pass)
+4. Show you the generated Flux YAML (and save it if `--output` is set), then ask for confirmation (skipped by `--assume-yes`)
 5. Suspend the App CR (and its Chart CR on the workload cluster if applicable)
 6. Apply the new Flux resources to the cluster
 7. Watch the HelmRelease until it becomes ready — on failure, asks whether to roll back. If any suspend step found the App CR or Chart CR _already_ paused before this run, a note with the matching `kubectl` command is printed so you can undo that state manually if needed

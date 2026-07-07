@@ -556,3 +556,72 @@ class TestStripServerFields:
         }
         result = self.strip(doc)
         assert "annotations" not in result["metadata"]
+
+
+_APP_WITH_MULTIKEY_CONFIG = {
+    **_APP_DICT,
+    "spec": {**_APP_DICT["spec"],
+             "config": {"configMap": {"name": "my-cm", "namespace": "giantswarm"}}},
+}
+
+_MULTIKEY_REFS = {("ConfigMap", "my-cm", "giantswarm"): {"data": {"values.yaml": "x", "alt.yaml": "y"}}}
+
+
+class TestNonInteractiveFlags:
+    def _run(self, args=None, input_text=None):
+        return CliRunner().invoke(cli, ["migrate"] + (args or []), input=input_text)
+
+    def _args(self):
+        return ["--name", "my-app", "--namespace", "giantswarm"]
+
+    def _ready_api(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = {
+            "status": {"conditions": [{"type": "Ready", "status": "True", "reason": "InstallSucceeded"}]},
+        }
+        return api
+
+    def test_malformed_values_key_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--dry-run", "--values-key", "garbage"])
+        assert result.exit_code != 0
+
+    def test_malformed_values_key_shows_format_hint(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--dry-run", "--values-key", "garbage"])
+        assert "KIND/NAME=KEY" in result.output
+
+    def test_values_key_pre_answers_prompt_in_dry_run(self):
+        with patch("fetcher.fetch",
+                   return_value=_fetch_result(app=_APP_WITH_MULTIKEY_CONFIG, referenced_configs=_MULTIKEY_REFS)), \
+             patch("click.prompt") as mock_prompt:
+            result = self._run(self._args() + ["--dry-run", "--values-key", "ConfigMap/my-cm=alt.yaml"])
+        mock_prompt.assert_not_called()
+        assert result.exit_code == 0
+        assert "(--values-key)" in result.output
+
+    def test_assume_yes_without_values_key_errors_on_multikey(self):
+        with patch("fetcher.fetch",
+                   return_value=_fetch_result(app=_APP_WITH_MULTIKEY_CONFIG, referenced_configs=_MULTIKEY_REFS)):
+            result = self._run(self._args() + ["--dry-run", "--assume-yes"])
+        assert result.exit_code != 0
+        assert "multiple keys" in result.output
+
+    def test_assume_yes_skips_proceed_prompt(self):
+        with patch("fetcher.fetch", return_value=_fetch_result(app=_APP_DICT_FLUX)), \
+             patch("migrator.load_client", return_value=self._ready_api()), \
+             patch("migrator.apply_flux_resources.DynamicClient"), \
+             patch("migrator.monitor_helm_release.time.sleep"):
+            result = self._run(self._args() + ["--assume-yes"])  # no input supplied
+        assert result.exit_code == 0
+        assert "--assume-yes" in result.output
+
+    def test_assume_yes_does_not_auto_confirm_cr_deletion(self):
+        # Non-Flux app reaches the destructive delete prompt; --assume-yes must NOT auto-confirm it.
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
+             patch("migrator.load_client", return_value=self._ready_api()), \
+             patch("migrator.apply_flux_resources.DynamicClient"), \
+             patch("migrator.monitor_helm_release.time.sleep"), \
+             patch("main.delete_app_and_chart") as mock_delete:
+            self._run(self._args() + ["--assume-yes"], input_text="n\n")
+        mock_delete.assert_not_called()

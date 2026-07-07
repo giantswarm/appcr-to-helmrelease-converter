@@ -72,13 +72,37 @@ def _section(title: str) -> None:
     con.rule(f"[bold cyan]▌ {title}[/bold cyan]", align="left")
 
 
+def _parse_values_keys(entries) -> dict[tuple[str, str], str]:
+    overrides = {}
+    for entry in entries:
+        left, sep, key = entry.partition("=")
+        kind, slash, cfg_name = left.partition("/")
+        if not sep or not slash or not kind or not cfg_name or not key:
+            raise click.BadParameter(
+                f'"{entry}" is not in KIND/NAME=KEY form, e.g. ConfigMap/my-cm=values.yaml',
+                param_hint="--values-key",
+            )
+        overrides[(kind, cfg_name)] = key
+    return overrides
+
+
 @cli.command()
 @click.option("--name", required=True)
 @click.option("--namespace", required=True)
 @click.option("--context", "context", default=None)
 @click.option("--dry-run", is_flag=True, default=False)
 @click.option("--output", "output_file", type=click.Path(writable=True, dir_okay=False), default=None)
-def migrate_cmd(name, namespace, context, dry_run, output_file):
+@click.option(
+    "--assume-yes", "-y", "assume_yes", is_flag=True, default=False,
+    help="Auto-confirm the proceed and revert-on-failure prompts (never the destructive "
+         "delete of App/Chart CRs). Combine with --values-key for a fully non-interactive run.",
+)
+@click.option(
+    "--values-key", "values_key", multiple=True, metavar="KIND/NAME=KEY",
+    help="Pre-answer the valuesKey prompt for a multi-key ConfigMap/Secret, "
+         "e.g. --values-key ConfigMap/my-cm=values.yaml. Repeatable.",
+)
+def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, values_key):
     _section("Fetch")
     click.echo(f'Fetching "{name}" from namespace "{namespace}"...')
     try:
@@ -111,7 +135,16 @@ def migrate_cmd(name, namespace, context, dry_run, output_file):
         click.echo(f"{len(warnings)} warning(s), 0 errors")
 
     _section("Resolve")
-    resolution = resolver.resolve(app, result.referenced_configs)
+    try:
+        resolution = resolver.resolve(
+            app,
+            result.referenced_configs,
+            overrides=_parse_values_keys(values_key),
+            assume_yes=assume_yes,
+        )
+    except resolver.ResolverError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
 
     _section("Generated Flux resources")
     docs = convert(app, catalog, resolution)
@@ -128,7 +161,9 @@ def migrate_cmd(name, namespace, context, dry_run, output_file):
         raise SystemExit(0)
 
     _section("Confirm")
-    if not click.confirm("Proceed with live migration?"):
+    if assume_yes:
+        click.echo("Proceeding with live migration (--assume-yes).")
+    elif not click.confirm("Proceed with live migration?"):
         raise SystemExit(0)
 
     _section(f"Suspend {namespace}/{name}")
@@ -165,7 +200,7 @@ def migrate_cmd(name, namespace, context, dry_run, output_file):
             runner.run(step)
         except migrator.MigratorError as e:
             click.echo(f"❌ {e}", err=True)
-            if click.confirm("Revert changes?", default=True):
+            if assume_yes or click.confirm("Revert changes?", default=True):
                 click.echo("Reverting...", err=True)
                 try:
                     runner.revert_all()

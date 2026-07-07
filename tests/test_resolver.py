@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
-from resolver import Resolution, resolve
+import pytest
+
+from resolver import Resolution, ResolverError, resolve
 
 
 _APP_NS = "org-acme"
@@ -90,3 +92,48 @@ class TestResolveSingleKey:
         refs = {("Secret", "s", _APP_NS): _secret("s", ["secret-values.yaml"])}
         result = resolve(app, refs)
         assert result.key_overrides == {("Secret", "s"): "secret-values.yaml"}
+
+
+class TestResolveWithOverrides:
+    def _multi_key_app_refs(self):
+        app = _app({"config": {"configMap": {"name": "cm", "namespace": _APP_NS}}})
+        refs = {("ConfigMap", "cm", _APP_NS): _cm("cm", ["values.yaml", "alt.yaml"])}
+        return app, refs
+
+    def test_override_pre_answers_without_prompting(self):
+        app, refs = self._multi_key_app_refs()
+        with patch("click.prompt") as mock_prompt:
+            result = resolve(app, refs, overrides={("ConfigMap", "cm"): "alt.yaml"})
+        mock_prompt.assert_not_called()
+        assert result.key_overrides == {("ConfigMap", "cm"): "alt.yaml"}
+
+    def test_override_key_absent_from_resource_raises(self):
+        app, refs = self._multi_key_app_refs()
+        with pytest.raises(ResolverError, match="not a data key"):
+            resolve(app, refs, overrides={("ConfigMap", "cm"): "nope.yaml"})
+
+    def test_override_ignored_for_single_key_resource(self):
+        app = _app({"config": {"configMap": {"name": "cm", "namespace": _APP_NS}}})
+        refs = {("ConfigMap", "cm", _APP_NS): _cm("cm", ["configmap-values.yaml"])}
+        result = resolve(app, refs, overrides={("ConfigMap", "cm"): "alt.yaml"})
+        assert result.key_overrides == {("ConfigMap", "cm"): "configmap-values.yaml"}
+
+
+class TestResolveAssumeYes:
+    def test_multi_key_without_override_raises(self):
+        app = _app({"config": {"configMap": {"name": "cm", "namespace": _APP_NS}}})
+        refs = {("ConfigMap", "cm", _APP_NS): _cm("cm", ["values.yaml", "alt.yaml"])}
+        with pytest.raises(ResolverError, match="pass --values-key"):
+            resolve(app, refs, assume_yes=True)
+
+    def test_multi_key_with_override_resolves(self):
+        app = _app({"config": {"configMap": {"name": "cm", "namespace": _APP_NS}}})
+        refs = {("ConfigMap", "cm", _APP_NS): _cm("cm", ["values.yaml", "alt.yaml"])}
+        result = resolve(app, refs, overrides={("ConfigMap", "cm"): "alt.yaml"}, assume_yes=True)
+        assert result.key_overrides == {("ConfigMap", "cm"): "alt.yaml"}
+
+    def test_single_key_still_auto_resolves(self):
+        app = _app({"config": {"configMap": {"name": "cm", "namespace": _APP_NS}}})
+        refs = {("ConfigMap", "cm", _APP_NS): _cm("cm", ["configmap-values.yaml"])}
+        result = resolve(app, refs, assume_yes=True)
+        assert result.key_overrides == {("ConfigMap", "cm"): "configmap-values.yaml"}
