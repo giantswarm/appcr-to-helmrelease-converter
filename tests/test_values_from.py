@@ -70,8 +70,11 @@ class TestToReferenceWithPriority:
 
 
 class TestCalculateValuesFrom:
-    def _app(self, spec):
-        return {"spec": spec}
+    def _app(self, spec, namespace=None):
+        app = {"spec": spec}
+        if namespace is not None:
+            app["metadata"] = {"namespace": namespace}
+        return app
 
     def test_empty_spec_returns_empty_list(self):
         assert calculate_values_from(self._app({})) == []
@@ -131,14 +134,34 @@ class TestCalculateValuesFrom:
         assert "namespace" not in calculate_values_from(app)[0]
 
     def test_extra_configs_psp_removal_patch_configmap_dropped(self):
-        app = self._app({"extraConfigs": [{"name": "psp-removal-patch", "namespace": "ns"}]})
+        app = self._app({"extraConfigs": [{"name": "psp-removal-patch", "namespace": "ns"}]}, namespace="ns")
         assert calculate_values_from(app) == []
 
     def test_extra_configs_psp_removal_patch_secret_kind_not_dropped(self):
-        app = self._app({"extraConfigs": [{"name": "psp-removal-patch", "kind": "Secret", "namespace": "ns"}]})
+        app = self._app(
+            {"extraConfigs": [{"name": "psp-removal-patch", "kind": "Secret", "namespace": "ns"}]}, namespace="ns"
+        )
         result = calculate_values_from(app)
         assert len(result) == 1
         assert result[0]["kind"] == "Secret"
+
+    def test_extra_configs_psp_removal_patch_suffixed_name_dropped(self):
+        app = self._app(
+            {"extraConfigs": [{"name": "psp-removal-patch-datadog", "namespace": "ns"}]}, namespace="ns"
+        )
+        assert calculate_values_from(app) == []
+
+    def test_extra_configs_psp_removal_patch_different_namespace_not_dropped(self):
+        app = self._app(
+            {"extraConfigs": [{"name": "psp-removal-patch", "namespace": "other-ns"}]}, namespace="ns"
+        )
+        result = calculate_values_from(app)
+        assert len(result) == 1
+        assert result[0]["name"] == "psp-removal-patch"
+
+    def test_extra_configs_psp_removal_patch_missing_namespace_defaults_to_app_namespace(self):
+        app = self._app({"extraConfigs": [{"name": "psp-removal-patch"}]}, namespace="ns")
+        assert calculate_values_from(app) == []
 
     def test_sort_configmap_before_secret(self):
         app = self._app({

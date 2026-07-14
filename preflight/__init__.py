@@ -1,4 +1,4 @@
-from converter.values_from import PSP_REMOVAL_PATCH_NAME
+from converter.values_from import is_psp_removal_patch
 
 
 class PreflightIssue(Exception):
@@ -78,12 +78,14 @@ def check_flux_managed(app: dict, catalog: dict) -> list[PreflightIssue]:
 
 
 def check_psp_removal_patch(app: dict, catalog: dict) -> list[PreflightIssue]:
+    app_namespace = app.get("metadata", {}).get("namespace", "")
     extra_configs = app.get("spec", {}).get("extraConfigs", [])
     for entry in extra_configs:
         kind = entry.get("kind", "ConfigMap")
-        if kind.lower() == "configmap" and entry.get("name") == PSP_REMOVAL_PATCH_NAME:
+        if is_psp_removal_patch(entry, kind, app_namespace):
+            name = entry["name"]
             return [PreflightWarning(
-                f'extraConfigs contains "{PSP_REMOVAL_PATCH_NAME}" (ConfigMap); this legacy PodSecurityPolicy '
+                f'extraConfigs contains "{name}" (ConfigMap); this legacy PodSecurityPolicy '
                 "patch is always dropped — PodSecurityPolicies were removed in Kubernetes 1.25. If the chart "
                 "still errors without it, upgrade the chart instead of restoring this entry."
             )]

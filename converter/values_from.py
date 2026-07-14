@@ -3,7 +3,13 @@ from typing import Any, Optional
 
 ReferenceWithPriority = namedtuple("ReferenceWithPriority", ["reference", "priority"])
 
-PSP_REMOVAL_PATCH_NAME = "psp-removal-patch"
+PSP_REMOVAL_PATCH_PREFIX = "psp-removal-patch"
+
+
+def is_psp_removal_patch(entry: dict, kind: str, app_namespace: str) -> bool:
+    if kind.lower() != "configmap" or not entry.get("name", "").startswith(PSP_REMOVAL_PATCH_PREFIX):
+        return False
+    return (entry.get("namespace") or app_namespace) == app_namespace
 
 
 def _default_values_key(kind: str) -> str:
@@ -31,6 +37,8 @@ def to_reference_with_priority(reference: dict, kind: str, default_priority: int
 
 
 def calculate_values_from(app: dict, resolution=None) -> list[OrderedDict[Any, Any]]:
+    app_namespace = (app.get("metadata") or {}).get("namespace", "")
+
     cluster_config_map = app["spec"].get("config", {}).get("configMap", {})
     cluster_secret = app["spec"].get("config", {}).get("secret", {})
 
@@ -55,7 +63,7 @@ def calculate_values_from(app: dict, resolution=None) -> list[OrderedDict[Any, A
 
     for extra_config in extra_configs:
         kind = extra_config.get("kind", "ConfigMap")
-        if kind.lower() == "configmap" and extra_config.get("name") == PSP_REMOVAL_PATCH_NAME:
+        if is_psp_removal_patch(extra_config, kind, app_namespace):
             continue
         result = to_reference_with_priority(extra_config, kind, 25, resolution)
         if result: intermediate_result.append(result)

@@ -128,7 +128,7 @@ Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR b
 
 - `spec.install`, `spec.upgrade`, `spec.rollback`, `spec.uninstall` on App CRs are always empty `{}` in observed real data. Decision: the converter omits them entirely; non-empty blocks are out of scope.
 - `spec.config.configMap`, `spec.config.secret`, `spec.userConfig.configMap`, and `spec.userConfig.secret` sub-fields with an empty `name` are Go zero-value structs serialised to YAML — the App CR schema uses pointer-free structs so the field appears on the wire even when never populated. The converter skips these entries with a preflight warning, matching app-operator's behaviour. See ADR 0006.
-- A `spec.extraConfigs[]` entry named `psp-removal-patch` (kind ConfigMap) is a legacy artifact used to patch away `PodSecurityPolicy` rendering before PSPs were removed in Kubernetes 1.25. The converter always drops it from `valuesFrom` with a preflight warning; there is no flag to keep it. See ADR 0024.
+- A `spec.extraConfigs[]` entry whose name starts with `psp-removal-patch` (kind ConfigMap, in the App CR's own namespace) is a legacy artifact created by app-admission-controller to patch away `PodSecurityPolicy` rendering before PSPs were removed in Kubernetes 1.25 — the suffixed form (e.g. `psp-removal-patch-datadog`) comes from AAC's per-app custom patches. The converter always drops matching entries from `valuesFrom` with a preflight warning; there is no flag to keep it. See ADR 0024.
 
 
 ## Flagged ambiguities
