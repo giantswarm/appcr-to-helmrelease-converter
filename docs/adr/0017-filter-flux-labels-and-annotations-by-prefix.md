@@ -32,6 +32,10 @@ do not match the `fluxcd.io/` prefix:
 - `app-operator.giantswarm.io/paused` (annotation)
 - `app-operator.giantswarm.io/version` (label)
 - `chart-operator.giantswarm.io/force-helm-upgrade` (annotation)
+- `policy.giantswarm.io/psp-status` (label) — records the outcome of the legacy
+  `psp-removal-patch` extra config (ADR 0024); meaningless once
+  PodSecurityPolicies are gone from the cluster, dropped silently like every
+  other entry in this list
 
 ## Considered options
 

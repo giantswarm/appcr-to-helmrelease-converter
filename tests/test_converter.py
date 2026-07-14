@@ -121,6 +121,10 @@ class TestConvert:
         app = _app_dict(labels={"app-operator.giantswarm.io/version": "1.0.0"})
         assert "labels" not in convert(app, MINIMAL_CATALOG)[1]["metadata"]
 
+    def test_psp_status_label_removed(self):
+        app = _app_dict(labels={"policy.giantswarm.io/psp-status": "removed"})
+        assert "labels" not in convert(app, MINIMAL_CATALOG)[1]["metadata"]
+
     def test_mixed_labels_only_blocklisted_ones_removed(self):
         app = _app_dict(labels={
             "team": "honeybadger",

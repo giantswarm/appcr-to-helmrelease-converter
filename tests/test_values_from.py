@@ -130,6 +130,16 @@ class TestCalculateValuesFrom:
         app = self._app({"extraConfigs": [{"name": "extra", "namespace": "some-ns"}]})
         assert "namespace" not in calculate_values_from(app)[0]
 
+    def test_extra_configs_psp_removal_patch_configmap_dropped(self):
+        app = self._app({"extraConfigs": [{"name": "psp-removal-patch", "namespace": "ns"}]})
+        assert calculate_values_from(app) == []
+
+    def test_extra_configs_psp_removal_patch_secret_kind_not_dropped(self):
+        app = self._app({"extraConfigs": [{"name": "psp-removal-patch", "kind": "Secret", "namespace": "ns"}]})
+        result = calculate_values_from(app)
+        assert len(result) == 1
+        assert result[0]["kind"] == "Secret"
+
     def test_sort_configmap_before_secret(self):
         app = self._app({
             "config": {

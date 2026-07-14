@@ -3,6 +3,8 @@ from typing import Any, Optional
 
 ReferenceWithPriority = namedtuple("ReferenceWithPriority", ["reference", "priority"])
 
+PSP_REMOVAL_PATCH_NAME = "psp-removal-patch"
+
 
 def _default_values_key(kind: str) -> str:
     return "configmap-values.yaml" if kind.lower() == "configmap" else "secret-values.yaml"
@@ -52,12 +54,10 @@ def calculate_values_from(app: dict, resolution=None) -> list[OrderedDict[Any, A
     if result: intermediate_result.append(result)
 
     for extra_config in extra_configs:
-        result = to_reference_with_priority(
-            extra_config,
-            extra_config.get("kind", "ConfigMap"),
-            25,
-            resolution,
-        )
+        kind = extra_config.get("kind", "ConfigMap")
+        if kind.lower() == "configmap" and extra_config.get("name") == PSP_REMOVAL_PATCH_NAME:
+            continue
+        result = to_reference_with_priority(extra_config, kind, 25, resolution)
         if result: intermediate_result.append(result)
 
     intermediate_result.sort(key=lambda x: x.priority, reverse=False)
