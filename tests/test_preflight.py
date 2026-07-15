@@ -9,6 +9,7 @@ from preflight import (
     check_multiple_helm_repos,
     check_namespace_config,
     check_oci_fallback,
+    check_psp_removal_patch,
     run_preflight,
 )
 
@@ -168,6 +169,44 @@ class TestCheckEmptyValuesFromNames:
             "userConfig": {"secret": {"name": "s", "namespace": "org-x"}},
         }}
         assert check_empty_values_from_names(app, _EMPTY_CATALOG) == []
+
+
+class TestCheckPspRemovalPatch:
+    def test_present_returns_warning(self):
+        app = {
+            "metadata": {"namespace": "ns"},
+            "spec": {"extraConfigs": [{"name": "psp-removal-patch", "namespace": "ns"}]},
+        }
+        result = check_psp_removal_patch(app, _EMPTY_CATALOG)
+        assert len(result) == 1
+        assert isinstance(result[0], PreflightWarning)
+        assert "psp-removal-patch" in str(result[0])
+
+    def test_absent_returns_empty_list(self):
+        app = {
+            "metadata": {"namespace": "ns"},
+            "spec": {"extraConfigs": [{"name": "other-config", "namespace": "ns"}]},
+        }
+        assert check_psp_removal_patch(app, _EMPTY_CATALOG) == []
+
+    def test_no_extra_configs_returns_empty_list(self):
+        assert check_psp_removal_patch({"metadata": {"namespace": "ns"}, "spec": {}}, _EMPTY_CATALOG) == []
+
+    def test_suffixed_name_returns_warning(self):
+        app = {
+            "metadata": {"namespace": "ns"},
+            "spec": {"extraConfigs": [{"name": "psp-removal-patch-datadog", "namespace": "ns"}]},
+        }
+        result = check_psp_removal_patch(app, _EMPTY_CATALOG)
+        assert len(result) == 1
+        assert "psp-removal-patch-datadog" in str(result[0])
+
+    def test_different_namespace_returns_empty_list(self):
+        app = {
+            "metadata": {"namespace": "ns"},
+            "spec": {"extraConfigs": [{"name": "psp-removal-patch", "namespace": "other-ns"}]},
+        }
+        assert check_psp_removal_patch(app, _EMPTY_CATALOG) == []
 
 
 class TestCheckMultipleHelmRepos:
@@ -331,6 +370,16 @@ class TestRunPreflight:
         issues = run_preflight(app, _CATALOG_OCI)
         assert len(issues) == 1
         assert isinstance(issues[0], PreflightWarning)
+
+    def test_collects_psp_removal_patch_warning(self):
+        app = {
+            "metadata": {"namespace": "ns"},
+            "spec": {"extraConfigs": [{"name": "psp-removal-patch", "namespace": "ns"}]},
+        }
+        issues = run_preflight(app, _CATALOG_OCI)
+        assert len(issues) == 1
+        assert isinstance(issues[0], PreflightWarning)
+        assert "psp-removal-patch" in str(issues[0])
 
     def test_collects_catalog_warning_alongside_app_warnings(self):
         app = {"spec": {"namespaceConfig": {"annotations": {}}}}

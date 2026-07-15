@@ -98,6 +98,7 @@ _ANNOTATION_BLOCKLIST = {
 
 _LABEL_BLOCKLIST = {
     "app-operator.giantswarm.io/version",
+    "policy.giantswarm.io/psp-status",
 }
 
 

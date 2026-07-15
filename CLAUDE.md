@@ -67,7 +67,7 @@ HelmRelease (Path B):
 
 **Filtered out:**
 - Annotations: `chart-operator.giantswarm.io/force-helm-upgrade`, `app-operator.giantswarm.io/paused`
-- Labels: `app-operator.giantswarm.io/version`
+- Labels: `app-operator.giantswarm.io/version`, `policy.giantswarm.io/psp-status`
 
 ## Feature parity backlog
 
@@ -123,6 +123,10 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 **15. `depends-on` annotation → `spec.dependsOn` on HelmRelease** ✓ _Implemented: `app-operator.giantswarm.io/depends-on` (comma-separated names) maps to `spec.dependsOn` entries on the generated HelmRelease; `dependsOn` appears before `install` in spec (alphabetical). Both `depends-on` and `depends-on-helmrelease` annotations stripped from HelmRelease metadata. Preflight verifies each dependency HelmRelease exists in the same namespace (existence only — readiness enforced by Flux at runtime); emits info note to operator. Annotation key shared as `_DEPENDS_ON_ANNOTATION` constant in both `fetcher/` and `converter/`; null-annotation guard (`(annotations or {}).get(...)`) prevents crash on explicit YAML `null`. `dependency_helm_releases: dict` added to `FetchResult`; pre-fetched in `fetcher.fetch()`, passed into `run_preflight` as new param. README updated. See ADR 0020._
 
 **16. Revert note for pre-existing suspend state** ✓ _Implemented: see ADR 0022._ When a suspend step's revert is skipped because `_did_pause` / `_did_disable_reconcile` is `False` and the state was already present before this run, emit a note with a `kubectl` command to undo manually. `MigrationStep` gains `revert_note: str | None`; `MigrationRunner.revert_all()` collects notes into `self.revert_notes`; `main.py` prints them to stderr after the revert block.
+
+**17. Drop legacy `psp-removal-patch*` extraConfigs entries** ✓ _Implemented: see ADR 0024._ `calculate_values_from()` unconditionally excludes any `spec.extraConfigs[]` entry with `kind: ConfigMap` (case-insensitive), `name` starting with `psp-removal-patch` (covers both the default name and app-admission-controller's per-app suffixed names, e.g. `psp-removal-patch-datadog`), and `namespace` equal to the App CR's own namespace (defaulting to it when absent) — a pre-Kubernetes-1.25 PodSecurityPolicy patch with no equivalent once PSPs were removed. Scoped to `extraConfigs` only — `spec.config`/`spec.userConfig` are not checked. `check_psp_removal_patch` preflight warning added to `_CHECKS`; fetch/resolve are untouched, filtering happens only when building `valuesFrom`. Shared `is_psp_removal_patch()` predicate in `converter/values_from.py`, imported by `preflight/__init__.py`.
+
+**18. Drop legacy `policy.giantswarm.io/psp-status` label** ✓ _Implemented: see ADR 0017 (amended)._ `policy.giantswarm.io/psp-status` added to `_LABEL_BLOCKLIST` in `converter/resources.py` — a companion to item 17's `psp-removal-patch` cleanup, records the outcome of that same legacy patch and is meaningless once PSPs are gone. Dropped silently, same as every other blocklist entry; no preflight warning (unlike the extraConfigs removal, this is inert metadata with no functional effect).
 
 ## Dev setup
 

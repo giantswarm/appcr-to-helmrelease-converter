@@ -178,6 +178,10 @@ class TestBuildHelmRelease:
         result = build_helm_release(_app(labels={"app-operator.giantswarm.io/version": "1.0.0"}))
         assert "labels" not in result["metadata"]
 
+    def test_psp_status_label_removed(self):
+        result = build_helm_release(_app(labels={"policy.giantswarm.io/psp-status": "removed"}))
+        assert "labels" not in result["metadata"]
+
     def test_flux_label_removed(self):
         result = build_helm_release(_app(labels={
             "kustomize.toolkit.fluxcd.io/namespace": "my-namespace",

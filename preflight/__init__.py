@@ -1,3 +1,6 @@
+from converter.values_from import is_psp_removal_patch
+
+
 class PreflightIssue(Exception):
     pass
 
@@ -74,6 +77,21 @@ def check_flux_managed(app: dict, catalog: dict) -> list[PreflightIssue]:
     return []
 
 
+def check_psp_removal_patch(app: dict, catalog: dict) -> list[PreflightIssue]:
+    app_namespace = app.get("metadata", {}).get("namespace", "")
+    extra_configs = app.get("spec", {}).get("extraConfigs", [])
+    for entry in extra_configs:
+        kind = entry.get("kind", "ConfigMap")
+        if is_psp_removal_patch(entry, kind, app_namespace):
+            name = entry["name"]
+            return [PreflightWarning(
+                f'extraConfigs contains "{name}" (ConfigMap); this legacy PodSecurityPolicy '
+                "patch is always dropped — PodSecurityPolicies were removed in Kubernetes 1.25. If the chart "
+                "still errors without it, upgrade the chart instead of restoring this entry."
+            )]
+    return []
+
+
 def check_multiple_helm_repos(app: dict, catalog: dict) -> list[PreflightIssue]:
     count = sum(
         1 for repo in (catalog.get("spec") or {}).get("repositories") or []
@@ -128,6 +146,7 @@ _CHECKS = [
     check_kube_config,
     check_namespace_config,
     check_empty_values_from_names,
+    check_psp_removal_patch,
     check_multiple_helm_repos,
     check_oci_fallback,
     check_flux_managed,
