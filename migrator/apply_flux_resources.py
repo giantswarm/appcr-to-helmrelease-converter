@@ -7,7 +7,7 @@ from kubernetes.dynamic import DynamicClient
 from . import MigrationStep, MigratorError, _api_message, _HR_GROUP, _HR_VERSION, _HR_PLURAL, _POLL_INTERVAL_S, _POLL_TIMEOUT_S
 
 _SOURCE_META = {
-    "OCIRepository": ("source.toolkit.fluxcd.io", "v1beta2", "ocirepositories"),
+    "OCIRepository": ("source.toolkit.fluxcd.io", "v1", "ocirepositories"),
     "HelmRepository": ("source.toolkit.fluxcd.io", "v1", "helmrepositories"),
 }
 _FIELD_MANAGER = "appcr-to-helmrelease-converter"

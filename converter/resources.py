@@ -49,7 +49,7 @@ def build_oci_repository(app: dict, catalog: dict) -> OrderedDict:
     url_base = _oci_url_from_catalog(catalog)
     url = f"{url_base.rstrip('/')}/{app['spec']['name']}"
     return OrderedDict([
-        ("apiVersion", "source.toolkit.fluxcd.io/v1beta2"),
+        ("apiVersion", "source.toolkit.fluxcd.io/v1"),
         ("kind", "OCIRepository"),
         ("metadata", OrderedDict([
             ("name", app["metadata"]["name"]),

@@ -42,7 +42,7 @@ class TestConvert:
     def test_first_doc_is_oci_repository(self):
         oci = convert(MINIMAL_APP, MINIMAL_CATALOG)[0]
         assert oci["kind"] == "OCIRepository"
-        assert oci["apiVersion"] == "source.toolkit.fluxcd.io/v1beta2"
+        assert oci["apiVersion"] == "source.toolkit.fluxcd.io/v1"
 
     def test_second_doc_is_helm_release(self):
         hr = convert(MINIMAL_APP, MINIMAL_CATALOG)[1]

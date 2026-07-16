@@ -7,7 +7,7 @@ from kubernetes.client.exceptions import ApiException
 
 
 _OCI_REPO = {
-    "apiVersion": "source.toolkit.fluxcd.io/v1beta2",
+    "apiVersion": "source.toolkit.fluxcd.io/v1",
     "kind": "OCIRepository",
     "metadata": {"name": "my-app", "namespace": "giantswarm"},
     "spec": {
@@ -43,7 +43,7 @@ class TestApplyFluxResources:
             req_call = mock_dyn.request.call_args_list[0]
             assert req_call.args[0] == "patch"
             assert "source.toolkit.fluxcd.io" in req_call.args[1]
-            assert "v1beta2" in req_call.args[1]
+            assert "v1" in req_call.args[1]
             assert "ocirepositories" in req_call.args[1]
             assert "giantswarm" in req_call.args[1]
             assert req_call.kwargs["field_manager"] == "appcr-to-helmrelease-converter"
