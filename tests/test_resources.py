@@ -264,7 +264,7 @@ class TestBuildOciRepository:
         assert build_oci_repository(_app(), _catalog())["kind"] == "OCIRepository"
 
     def test_api_version(self):
-        assert build_oci_repository(_app(), _catalog())["apiVersion"] == "source.toolkit.fluxcd.io/v1beta2"
+        assert build_oci_repository(_app(), _catalog())["apiVersion"] == "source.toolkit.fluxcd.io/v1"
 
     def test_metadata_name(self):
         assert build_oci_repository(_app(name="my-app"), _catalog())["metadata"]["name"] == "my-app"
