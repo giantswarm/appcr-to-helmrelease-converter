@@ -103,14 +103,14 @@ def _filtered_metadata(app: dict) -> OrderedDict:
     ])
 
     annotations = OrderedDict(
-        (k, v) for k, v in app["metadata"].get("annotations", {}).items()
+        (k, v) for k, v in (app["metadata"].get("annotations") or {}).items()
         if k not in _ANNOTATION_BLOCKLIST and "fluxcd.io/" not in k
     )
     if annotations:
         meta["annotations"] = annotations
 
     labels = OrderedDict(
-        (k, v) for k, v in app["metadata"].get("labels", {}).items()
+        (k, v) for k, v in (app["metadata"].get("labels") or {}).items()
         if k not in _LABEL_BLOCKLIST and "fluxcd.io/" not in k
     )
     if labels:

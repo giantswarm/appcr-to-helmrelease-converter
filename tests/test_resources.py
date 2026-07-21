@@ -109,6 +109,13 @@ class TestBuildHelmRelease:
     def test_null_annotations_means_no_depends_on_in_spec(self):
         assert "dependsOn" not in build_helm_release(_app(annotations=None))["spec"]
 
+    def test_explicit_null_annotations_and_labels_key_does_not_crash(self):
+        app = _app()
+        app["metadata"]["annotations"] = None
+        app["metadata"]["labels"] = None
+        assert "annotations" not in build_helm_release(app)["metadata"]
+        assert "labels" not in build_helm_release(app)["metadata"]
+
     def test_depends_on_annotation_stripped_from_metadata(self):
         result = build_helm_release(_app(annotations={"app-operator.giantswarm.io/depends-on": "coredns"}))
         assert "app-operator.giantswarm.io/depends-on" not in result["metadata"].get("annotations", {})
