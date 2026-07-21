@@ -109,6 +109,13 @@ class TestBuildHelmRelease:
     def test_null_annotations_means_no_depends_on_in_spec(self):
         assert "dependsOn" not in build_helm_release(_app(annotations=None))["spec"]
 
+    def test_explicit_null_annotations_and_labels_key_does_not_crash(self):
+        app = _app()
+        app["metadata"]["annotations"] = None
+        app["metadata"]["labels"] = None
+        assert "annotations" not in build_helm_release(app)["metadata"]
+        assert "labels" not in build_helm_release(app)["metadata"]
+
     def test_depends_on_annotation_stripped_from_metadata(self):
         result = build_helm_release(_app(annotations={"app-operator.giantswarm.io/depends-on": "coredns"}))
         assert "app-operator.giantswarm.io/depends-on" not in result["metadata"].get("annotations", {})
@@ -317,6 +324,79 @@ class TestBuildOciRepository:
         with pytest.raises(ValueError, match="no oci repository"):
             build_oci_repository(_app(), cat)
 
+    def test_annotations_kept_when_not_in_blocklist(self):
+        result = build_oci_repository(_app(annotations={"custom.io/key": "value"}), _catalog())
+        assert result["metadata"]["annotations"] == {"custom.io/key": "value"}
+
+    def test_no_annotations_when_app_has_none(self):
+        assert "annotations" not in build_oci_repository(_app(), _catalog())["metadata"]
+
+    def test_blocked_annotations_removed(self):
+        result = build_oci_repository(_app(annotations={
+            "chart-operator.giantswarm.io/force-helm-upgrade": "true",
+            "app-operator.giantswarm.io/paused": "true",
+        }), _catalog())
+        assert "annotations" not in result["metadata"]
+
+    def test_mixed_annotations_only_blocklisted_removed(self):
+        result = build_oci_repository(_app(annotations={
+            "keep.me/key": "val",
+            "chart-operator.giantswarm.io/force-helm-upgrade": "true",
+        }), _catalog())
+        assert result["metadata"]["annotations"] == {"keep.me/key": "val"}
+
+    def test_flux_annotation_removed(self):
+        result = build_oci_repository(_app(annotations={
+            "kustomize.toolkit.fluxcd.io/name": "my-kustomization",
+        }), _catalog())
+        assert "annotations" not in result["metadata"]
+
+    def test_non_flux_annotation_kept_when_mixed_with_flux(self):
+        result = build_oci_repository(_app(annotations={
+            "custom.io/key": "value",
+            "kustomize.toolkit.fluxcd.io/name": "my-kustomization",
+        }), _catalog())
+        assert result["metadata"]["annotations"] == {"custom.io/key": "value"}
+
+    def test_latest_configmap_version_annotation_removed(self):
+        result = build_oci_repository(_app(annotations={
+            "app-operator.giantswarm.io/latest-configmap-version": "abc123",
+        }), _catalog())
+        assert "annotations" not in result["metadata"]
+
+    def test_latest_secret_version_annotation_removed(self):
+        result = build_oci_repository(_app(annotations={
+            "app-operator.giantswarm.io/latest-secret-version": "abc123",
+        }), _catalog())
+        assert "annotations" not in result["metadata"]
+
+    def test_depends_on_annotation_stripped_from_metadata(self):
+        result = build_oci_repository(_app(annotations={
+            "app-operator.giantswarm.io/depends-on": "coredns",
+        }), _catalog())
+        assert "annotations" not in result["metadata"]
+
+    def test_no_labels_when_app_has_none(self):
+        assert "labels" not in build_oci_repository(_app(), _catalog())["metadata"]
+
+    def test_labels_kept_when_not_in_blocklist(self):
+        result = build_oci_repository(_app(labels={"env": "prod"}), _catalog())
+        assert result["metadata"]["labels"] == {"env": "prod"}
+
+    def test_blocked_label_removed(self):
+        result = build_oci_repository(_app(labels={"app-operator.giantswarm.io/version": "1.0.0"}), _catalog())
+        assert "labels" not in result["metadata"]
+
+    def test_psp_status_label_removed(self):
+        result = build_oci_repository(_app(labels={"policy.giantswarm.io/psp-status": "removed"}), _catalog())
+        assert "labels" not in result["metadata"]
+
+    def test_flux_label_removed(self):
+        result = build_oci_repository(_app(labels={
+            "kustomize.toolkit.fluxcd.io/namespace": "my-namespace",
+        }), _catalog())
+        assert "labels" not in result["metadata"]
+
 
 # ---------------------------------------------------------------------------
 # build_helm_release_and_helm_repo
@@ -346,6 +426,79 @@ class TestBuildHelmReleaseAndHelmRepo:
     def test_helm_repository_url_from_catalog(self):
         cat = _helm_catalog(url="https://charts.example.io/stable")
         assert build_helm_release_and_helm_repo(_app(), cat)[0]["spec"]["url"] == "https://charts.example.io/stable"
+
+    def test_helm_repository_annotations_kept_when_not_in_blocklist(self):
+        result = build_helm_release_and_helm_repo(_app(annotations={"custom.io/key": "value"}), _helm_catalog())
+        assert result[0]["metadata"]["annotations"] == {"custom.io/key": "value"}
+
+    def test_helm_repository_no_annotations_when_app_has_none(self):
+        assert "annotations" not in build_helm_release_and_helm_repo(_app(), _helm_catalog())[0]["metadata"]
+
+    def test_helm_repository_blocked_annotations_removed(self):
+        result = build_helm_release_and_helm_repo(_app(annotations={
+            "chart-operator.giantswarm.io/force-helm-upgrade": "true",
+            "app-operator.giantswarm.io/paused": "true",
+        }), _helm_catalog())
+        assert "annotations" not in result[0]["metadata"]
+
+    def test_helm_repository_mixed_annotations_only_blocklisted_removed(self):
+        result = build_helm_release_and_helm_repo(_app(annotations={
+            "keep.me/key": "val",
+            "chart-operator.giantswarm.io/force-helm-upgrade": "true",
+        }), _helm_catalog())
+        assert result[0]["metadata"]["annotations"] == {"keep.me/key": "val"}
+
+    def test_helm_repository_flux_annotation_removed(self):
+        result = build_helm_release_and_helm_repo(_app(annotations={
+            "kustomize.toolkit.fluxcd.io/name": "my-kustomization",
+        }), _helm_catalog())
+        assert "annotations" not in result[0]["metadata"]
+
+    def test_helm_repository_non_flux_annotation_kept_when_mixed_with_flux(self):
+        result = build_helm_release_and_helm_repo(_app(annotations={
+            "custom.io/key": "value",
+            "kustomize.toolkit.fluxcd.io/name": "my-kustomization",
+        }), _helm_catalog())
+        assert result[0]["metadata"]["annotations"] == {"custom.io/key": "value"}
+
+    def test_helm_repository_latest_configmap_version_annotation_removed(self):
+        result = build_helm_release_and_helm_repo(_app(annotations={
+            "app-operator.giantswarm.io/latest-configmap-version": "abc123",
+        }), _helm_catalog())
+        assert "annotations" not in result[0]["metadata"]
+
+    def test_helm_repository_latest_secret_version_annotation_removed(self):
+        result = build_helm_release_and_helm_repo(_app(annotations={
+            "app-operator.giantswarm.io/latest-secret-version": "abc123",
+        }), _helm_catalog())
+        assert "annotations" not in result[0]["metadata"]
+
+    def test_helm_repository_depends_on_annotation_stripped_from_metadata(self):
+        result = build_helm_release_and_helm_repo(_app(annotations={
+            "app-operator.giantswarm.io/depends-on": "coredns",
+        }), _helm_catalog())
+        assert "annotations" not in result[0]["metadata"]
+
+    def test_helm_repository_no_labels_when_app_has_none(self):
+        assert "labels" not in build_helm_release_and_helm_repo(_app(), _helm_catalog())[0]["metadata"]
+
+    def test_helm_repository_labels_kept_when_not_in_blocklist(self):
+        result = build_helm_release_and_helm_repo(_app(labels={"env": "prod"}), _helm_catalog())
+        assert result[0]["metadata"]["labels"] == {"env": "prod"}
+
+    def test_helm_repository_blocked_label_removed(self):
+        result = build_helm_release_and_helm_repo(_app(labels={"app-operator.giantswarm.io/version": "1.0.0"}), _helm_catalog())
+        assert "labels" not in result[0]["metadata"]
+
+    def test_helm_repository_psp_status_label_removed(self):
+        result = build_helm_release_and_helm_repo(_app(labels={"policy.giantswarm.io/psp-status": "removed"}), _helm_catalog())
+        assert "labels" not in result[0]["metadata"]
+
+    def test_helm_repository_flux_label_removed(self):
+        result = build_helm_release_and_helm_repo(_app(labels={
+            "kustomize.toolkit.fluxcd.io/namespace": "my-namespace",
+        }), _helm_catalog())
+        assert "labels" not in result[0]["metadata"]
 
     def test_second_doc_is_helm_release(self):
         assert build_helm_release_and_helm_repo(_app(), _helm_catalog())[1]["kind"] == "HelmRelease"

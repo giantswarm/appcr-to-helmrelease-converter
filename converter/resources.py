@@ -51,10 +51,7 @@ def build_oci_repository(app: dict, catalog: dict) -> OrderedDict:
     return OrderedDict([
         ("apiVersion", "source.toolkit.fluxcd.io/v1"),
         ("kind", "OCIRepository"),
-        ("metadata", OrderedDict([
-            ("name", app["metadata"]["name"]),
-            ("namespace", app["metadata"]["namespace"]),
-        ])),
+        ("metadata", _filtered_metadata(app)),
         ("spec", OrderedDict([
             ("interval", "10m"),
             ("provider", "generic"),
@@ -71,10 +68,7 @@ def _build_helm_repository(app: dict, catalog: dict) -> OrderedDict:
     return OrderedDict([
         ("apiVersion", "source.toolkit.fluxcd.io/v1"),
         ("kind", "HelmRepository"),
-        ("metadata", OrderedDict([
-            ("name", app["metadata"]["name"]),
-            ("namespace", app["metadata"]["namespace"]),
-        ])),
+        ("metadata", _filtered_metadata(app)),
         ("spec", OrderedDict([
             ("interval", "10m"),
             ("url", url),
@@ -100,6 +94,29 @@ _LABEL_BLOCKLIST = {
     "app-operator.giantswarm.io/version",
     "policy.giantswarm.io/psp-status",
 }
+
+
+def _filtered_metadata(app: dict) -> OrderedDict:
+    meta = OrderedDict([
+        ("name", app["metadata"]["name"]),
+        ("namespace", app["metadata"]["namespace"]),
+    ])
+
+    annotations = OrderedDict(
+        (k, v) for k, v in (app["metadata"].get("annotations") or {}).items()
+        if k not in _ANNOTATION_BLOCKLIST and "fluxcd.io/" not in k
+    )
+    if annotations:
+        meta["annotations"] = annotations
+
+    labels = OrderedDict(
+        (k, v) for k, v in (app["metadata"].get("labels") or {}).items()
+        if k not in _LABEL_BLOCKLIST and "fluxcd.io/" not in k
+    )
+    if labels:
+        meta["labels"] = labels
+
+    return meta
 
 
 def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
@@ -133,26 +150,9 @@ def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
     hr = OrderedDict([
         ("apiVersion", "helm.toolkit.fluxcd.io/v2"),
         ("kind", "HelmRelease"),
-        ("metadata", OrderedDict([
-            ("name", app["metadata"]["name"]),
-            ("namespace", app["metadata"]["namespace"]),
-        ])),
+        ("metadata", _filtered_metadata(app)),
         ("spec", OrderedDict(spec_items)),
     ])
-
-    annotations = OrderedDict(
-        (k, v) for k, v in app["metadata"].get("annotations", {}).items()
-        if k not in _ANNOTATION_BLOCKLIST and "fluxcd.io/" not in k
-    )
-    if annotations:
-        hr["metadata"]["annotations"] = annotations
-
-    labels = OrderedDict(
-        (k, v) for k, v in app["metadata"].get("labels", {}).items()
-        if k not in _LABEL_BLOCKLIST and "fluxcd.io/" not in k
-    )
-    if labels:
-        hr["metadata"]["labels"] = labels
 
     kube_config = app["spec"].get("kubeConfig", {})
     is_remote = kube_config and not kube_config.get("inCluster")

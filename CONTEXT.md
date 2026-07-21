@@ -13,7 +13,7 @@ A Flux CD custom resource (`kind: HelmRelease`) that drives a Helm deployment. T
 _Avoid_: HR (in prose), helm release
 
 **OCIRepository**:
-A Flux CD custom resource (`kind: OCIRepository`) that points to a Helm chart in an OCI registry. Always produced alongside a HelmRelease as a pair.
+A Flux CD custom resource (`kind: OCIRepository`) that points to a Helm chart in an OCI registry. Always produced alongside a HelmRelease as a pair. Carries the same filtered App CR labels and annotations as the HelmRelease (see ADR 0017, extended to source resources by ADR 0025).
 _Avoid_: OCI source, chart source
 
 **Conversion**:
@@ -47,7 +47,7 @@ Hard error if neither field yields a recognised type (`oci` or `helm`). If multi
 _Avoid_: AppCatalog, catalog resource
 
 **HelmRepository**:
-A Flux CD custom resource (`kind: HelmRepository`) that points to an HTTP-based Helm chart registry. Produced when `catalog_dict["spec"]["repositories"][].type` is `helm`.
+A Flux CD custom resource (`kind: HelmRepository`) that points to an HTTP-based Helm chart registry. Produced when `catalog_dict["spec"]["repositories"][].type` is `helm`. Carries the same filtered App CR labels and annotations as the HelmRelease (see ADR 0017, extended to source resources by ADR 0025).
 _Avoid_: Helm repo source, chart repository resource
 
 **Fetch**:

@@ -76,7 +76,7 @@ Depending on the Catalog type:
 - **OCI catalog** → `OCIRepository` + `HelmRelease`
 - **Helm catalog** → `HelmRepository` + `HelmRelease`
 
-Config sources (`spec.config`, `spec.userConfig`, `spec.extraConfigs`) are carried over as `valuesFrom` entries on the HelmRelease, with priorities preserved. Flux- and GS-specific labels and annotations are filtered out of the output.
+Config sources (`spec.config`, `spec.userConfig`, `spec.extraConfigs`) are carried over as `valuesFrom` entries on the HelmRelease, with priorities preserved. Labels and annotations are carried over from the App CR onto every generated resource (HelmRelease and the OCIRepository/HelmRepository), filtering out Flux- and GS-specific keys.
 
 If the App CR carries `app-operator.giantswarm.io/depends-on`, the converted HelmRelease will have a `spec.dependsOn` list. The preflight check verifies that each referenced dependency HelmRelease exists — existence only, not readiness. Flux enforces ordering and waits for dependencies to become Ready at runtime.
 
