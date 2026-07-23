@@ -26,6 +26,39 @@ class TestResolveNoRefs:
         assert result.key_overrides == {}
 
 
+class TestResolveEmptyKeys:
+    def test_no_keys_marks_optional_without_prompting(self):
+        app = _app({"config": {"configMap": {"name": "cm", "namespace": _APP_NS}}})
+        refs = {("ConfigMap", "cm", _APP_NS): _cm("cm", [])}
+        with patch("click.prompt") as mock_prompt:
+            result = resolve(app, refs)
+        mock_prompt.assert_not_called()
+        assert result.optional == {("ConfigMap", "cm")}
+        assert result.key_overrides[("ConfigMap", "cm")] is None
+
+    def test_no_keys_does_not_raise_with_assume_yes(self):
+        app = _app({"config": {"configMap": {"name": "cm", "namespace": _APP_NS}}})
+        refs = {("ConfigMap", "cm", _APP_NS): _cm("cm", [])}
+        result = resolve(app, refs, assume_yes=True)
+        assert result.optional == {("ConfigMap", "cm")}
+
+    def test_no_keys_ignores_values_key_override(self):
+        app = _app({"config": {"configMap": {"name": "cm", "namespace": _APP_NS}}})
+        refs = {("ConfigMap", "cm", _APP_NS): _cm("cm", [])}
+        result = resolve(app, refs, overrides={("ConfigMap", "cm"): "values.yaml"})
+        assert result.optional == {("ConfigMap", "cm")}
+        assert result.key_overrides[("ConfigMap", "cm")] is None
+
+    def test_no_keys_prints_warning_to_stderr(self, capsys):
+        app = _app({"config": {"configMap": {"name": "cm", "namespace": _APP_NS}}})
+        refs = {("ConfigMap", "cm", _APP_NS): _cm("cm", [])}
+        resolve(app, refs)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert 'ConfigMap "cm" has no data keys' in captured.err
+        assert "optional: true" in captured.err
+
+
 class TestResolveMultipleKeys:
     def test_multiple_keys_prompts_user(self):
         app = _app({"config": {"configMap": {"name": "cm", "namespace": _APP_NS}}})

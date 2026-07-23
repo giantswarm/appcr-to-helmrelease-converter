@@ -234,6 +234,22 @@ class TestCalculateValuesFrom:
         result = calculate_values_from(app, resolution)
         assert result[0]["valuesKey"] == "my-values.yaml"
 
+    def test_resolution_optional_marks_reference_optional(self):
+        app = self._app({"config": {"configMap": {"name": "cm", "namespace": "ns"}}})
+        resolution = Resolution(
+            key_overrides={("ConfigMap", "cm"): None},
+            optional={("ConfigMap", "cm")},
+        )
+        result = calculate_values_from(app, resolution)
+        assert result[0]["optional"] is True
+        assert "valuesKey" not in result[0]
+
+    def test_resolution_not_optional_omits_optional_field(self):
+        app = self._app({"config": {"configMap": {"name": "cm", "namespace": "ns"}}})
+        resolution = Resolution(key_overrides={("ConfigMap", "cm"): "values.yaml"})
+        result = calculate_values_from(app, resolution)
+        assert "optional" not in result[0]
+
     def test_all_sources_five_entries(self):
         app = self._app({
             "config": {

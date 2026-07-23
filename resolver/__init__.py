@@ -12,6 +12,7 @@ class ResolverError(Exception):
 @dataclass
 class Resolution:
     key_overrides: dict[tuple[str, str], str | None] = field(default_factory=dict)
+    optional: set[tuple[str, str]] = field(default_factory=set)
 
 
 def resolve(
@@ -23,6 +24,7 @@ def resolve(
 ) -> Resolution:
     overrides = overrides or {}
     key_overrides = {}
+    optional = set()
     seen = set()
     for kind, name, ns in iter_refs(app):
         if (kind, name) in seen:
@@ -32,6 +34,14 @@ def resolve(
         if resource is None:
             continue
         keys = list((resource.get("data") or {}).keys())
+        if not keys:
+            click.echo(
+                f'{kind} "{name}" has no data keys — adding to valuesFrom as optional: true',
+                err=True,
+            )
+            optional.add((kind, name))
+            key_overrides[(kind, name)] = None
+            continue
         if len(keys) == 1:
             chosen = keys[0]
             click.echo(f'{kind} "{name}" → {chosen} (auto)')
@@ -55,4 +65,4 @@ def resolve(
             )
             click.echo(f'{kind} "{name}" → {chosen}')
         key_overrides[(kind, name)] = chosen
-    return Resolution(key_overrides=key_overrides)
+    return Resolution(key_overrides=key_overrides, optional=optional)

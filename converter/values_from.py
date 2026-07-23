@@ -25,12 +25,15 @@ def to_reference_with_priority(reference: dict, kind: str, default_priority: int
             values_key_items = [] if (override is None or override == "values.yaml") else [("valuesKey", override)]
         else:
             values_key_items = [("valuesKey", _default_values_key(kind))]
+        is_optional = resolution is not None and (canonical_kind, name) in resolution.optional
+        optional_items = [("optional", True)] if is_optional else []
         return ReferenceWithPriority(
             priority=reference.get("priority", default_priority),
             reference=OrderedDict([
                 ("kind", canonical_kind),
                 ("name", name),
                 *values_key_items,
+                *optional_items,
             ])
         )
     return None
