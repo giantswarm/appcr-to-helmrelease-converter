@@ -124,7 +124,7 @@ def check_missing_referenced_configs(app: dict, catalog: dict, referenced_config
 
 def check_empty_referenced_configs(app: dict, catalog: dict, referenced_configs: dict) -> list[PreflightIssue]:
     return [
-        PreflightError(f"{kind} \"{name}\" has no data keys; cannot determine valuesKey")
+        PreflightWarning(f"{kind} \"{name}\" has no data keys; valuesFrom entry will be marked optional: true")
         for (kind, name, ns), resource in referenced_configs.items()
         if resource is not None and not (resource.get("data") or {})
     ]

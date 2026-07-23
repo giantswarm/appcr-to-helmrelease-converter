@@ -60,7 +60,7 @@ The tool will:
 
 1. Fetch the App CR and its Catalog CR from the cluster
 2. Run preflight checks — including verifying that any `depends-on` dependencies exist as HelmReleases — and print any warnings
-3. Resolve `valuesKey` for each ConfigMap/Secret referenced by the app — prompts you to choose when a resource has multiple data keys (or takes the value from `--values-key`; with `--assume-yes` an unresolved multi-key resource is a hard error naming the flag to pass)
+3. Resolve `valuesKey` for each ConfigMap/Secret referenced by the app — prompts you to choose when a resource has multiple data keys (or takes the value from `--values-key`; with `--assume-yes` an unresolved multi-key resource is a hard error naming the flag to pass). A resource with zero data keys is never an error: it's carried into `valuesFrom` as `optional: true` with a warning, instead
 4. Show you the generated Flux YAML (and save it if `--output` is set), then ask for confirmation (skipped by `--assume-yes`)
 5. Suspend the App CR (and its Chart CR on the workload cluster if applicable)
 6. Apply the new Flux resources to the cluster

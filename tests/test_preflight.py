@@ -254,19 +254,19 @@ class TestCheckMissingReferencedConfigs:
 
 
 class TestCheckEmptyReferencedConfigs:
-    def test_empty_data_returns_error(self):
+    def test_empty_data_returns_warning(self):
         refs = {("ConfigMap", "cm", _APP_NS): {"data": {}}}
         from preflight import check_empty_referenced_configs
         result = check_empty_referenced_configs(_APP_BASE, _EMPTY_CATALOG, refs)
         assert len(result) == 1
-        assert isinstance(result[0], PreflightError)
+        assert isinstance(result[0], PreflightWarning)
 
-    def test_none_data_returns_error(self):
+    def test_none_data_returns_warning(self):
         refs = {("ConfigMap", "cm", _APP_NS): {"data": None}}
         from preflight import check_empty_referenced_configs
         result = check_empty_referenced_configs(_APP_BASE, _EMPTY_CATALOG, refs)
         assert len(result) == 1
-        assert isinstance(result[0], PreflightError)
+        assert isinstance(result[0], PreflightWarning)
 
     def test_resource_with_keys_returns_empty(self):
         refs = {("ConfigMap", "cm", _APP_NS): {"data": {"values.yaml": "x"}}}
