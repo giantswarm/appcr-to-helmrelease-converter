@@ -161,6 +161,12 @@ class TestBuildHelmRelease:
         }))
         assert "annotations" not in result["metadata"]
 
+    def test_trigger_reconciliation_annotation_removed(self):
+        result = build_helm_release(_app(annotations={
+            "app-operator.giantswarm.io/trigger-reconciliation": "true",
+        }))
+        assert "annotations" not in result["metadata"]
+
     def test_flux_annotation_removed(self):
         result = build_helm_release(_app(annotations={
             "kustomize.toolkit.fluxcd.io/name": "my-kustomization",

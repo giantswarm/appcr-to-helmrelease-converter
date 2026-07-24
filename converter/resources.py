@@ -87,6 +87,7 @@ _ANNOTATION_BLOCKLIST = {
     "app-operator.giantswarm.io/latest-configmap-version",
     "app-operator.giantswarm.io/latest-secret-version",
     "app-operator.giantswarm.io/paused",
+    "app-operator.giantswarm.io/trigger-reconciliation",
     "chart-operator.giantswarm.io/force-helm-upgrade",
 }
 
