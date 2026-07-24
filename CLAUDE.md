@@ -131,6 +131,8 @@ Ad-hoc `click.echo(..., err=True)` warnings (e.g. for `namespaceConfig`) should 
 
 **19. Extend filtered label/annotation propagation to OCIRepository and HelmRepository** ✓ _Implemented: see ADR 0025._ Extracted the ADR 0017 filter (`_ANNOTATION_BLOCKLIST`/`_LABEL_BLOCKLIST` + `fluxcd.io/` substring drop) into a shared `_filtered_metadata(app)` helper in `converter/resources.py`, now used by `build_oci_repository`, `_build_helm_repository`, and `_build_helm_release_common` — previously the source resources only ever got bare `name`/`namespace` metadata. `app-operator.giantswarm.io/depends-on` consumption into `spec.dependsOn` remains HelmRelease-only (ADR 0020); the annotation is still dropped from all three via the shared blocklist. `TestBuildOciRepository` and `TestBuildHelmReleaseAndHelmRepo` gained label/annotation test cases mirroring `TestBuildHelmRelease`.
 
+**20. Drop legacy `app-operator.giantswarm.io/trigger-reconciliation` annotation** ✓ _Implemented: see ADR 0017 (amended)._ Added to `_ANNOTATION_BLOCKLIST` in `converter/resources.py` — a fire-and-forget instruction to app-operator with no Flux equivalent, dropped silently like every other blocklist entry (no preflight warning).
+
 ## Dev setup
 
 ```bash

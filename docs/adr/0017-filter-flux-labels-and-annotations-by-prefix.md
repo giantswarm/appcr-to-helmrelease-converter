@@ -31,6 +31,9 @@ do not match the `fluxcd.io/` prefix:
 - `app-operator.giantswarm.io/latest-secret-version` (annotation)
 - `app-operator.giantswarm.io/paused` (annotation)
 - `app-operator.giantswarm.io/version` (label)
+- `app-operator.giantswarm.io/trigger-reconciliation` (annotation) — a
+  fire-and-forget instruction to app-operator with no lasting meaning and no
+  Flux equivalent; dropped silently like every other entry in this list
 - `chart-operator.giantswarm.io/force-helm-upgrade` (annotation)
 - `policy.giantswarm.io/psp-status` (label) — records the outcome of the legacy
   `psp-removal-patch` extra config (ADR 0024); meaningless once
