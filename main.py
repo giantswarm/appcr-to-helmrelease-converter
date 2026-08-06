@@ -73,12 +73,12 @@ def _section(title: str) -> None:
     con.rule(f"[bold cyan]▌ {title}[/bold cyan]", align="left")
 
 
-def _resolve_chart_api(api, app: dict, namespace: str):
+def _resolve_chart_api(api, app: dict):
     kube = (app.get("spec") or {}).get("kubeConfig") or {}
     if kube.get("inCluster") is False:
         secret = kube.get("secret") or {}
         secret_name = secret.get("name", "")
-        secret_ns = secret.get("namespace") or namespace
+        secret_ns = secret.get("namespace") or app["metadata"]["namespace"]
         return migrator.load_wc_client(migrator.core_client(), secret_name, secret_ns)
     return api
 
@@ -200,7 +200,7 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
     runner = migrator.MigrationRunner()
     console = Console(file=sys.stdout, highlight=False)
     try:
-        chart_api = _resolve_chart_api(api, app, namespace)
+        chart_api = _resolve_chart_api(api, app)
     except migrator.MigratorError as e:
         click.echo(f"❌ {e}", err=True)
         raise SystemExit(1)
@@ -286,7 +286,7 @@ def cleanup_cmd(name, namespace, context, dry_run, assume_yes):
 
     _section("Delete")
     try:
-        chart_api = _resolve_chart_api(api, app, namespace)
+        chart_api = _resolve_chart_api(api, app)
     except migrator.MigratorError as e:
         click.echo(f"❌ {e}", err=True)
         raise SystemExit(1)
