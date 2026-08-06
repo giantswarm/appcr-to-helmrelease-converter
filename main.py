@@ -4,6 +4,7 @@ from collections import OrderedDict
 
 import click
 import yaml
+from kubernetes.client.exceptions import ApiException
 from rich.console import Console
 from rich.syntax import Syntax
 from yaml.resolver import BaseResolver
@@ -13,7 +14,7 @@ import migrator
 import resolver
 from converter import convert
 from fetcher import FetchError
-from migrator.cleanup import delete_app_and_chart, flux_cleanup_message
+from migrator.cleanup import delete_app_and_chart, flux_cleanup_message, verify_migration
 from preflight import PreflightError, run_preflight
 
 
@@ -72,6 +73,27 @@ def _section(title: str) -> None:
     con.rule(f"[bold cyan]▌ {title}[/bold cyan]", align="left")
 
 
+def _resolve_chart_api(api, app: dict, namespace: str):
+    kube = (app.get("spec") or {}).get("kubeConfig") or {}
+    if kube.get("inCluster") is False:
+        secret = kube.get("secret") or {}
+        secret_name = secret.get("name", "")
+        secret_ns = secret.get("namespace") or namespace
+        return migrator.load_wc_client(migrator.core_client(), secret_name, secret_ns)
+    return api
+
+
+def _delete_and_report(api, chart_api, app: dict) -> None:
+    try:
+        notes = delete_app_and_chart(api, chart_api, app)
+    except migrator.MigratorError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+    for note in notes:
+        click.echo(f"ℹ️  {note}")
+    click.echo("✅ App CR and Chart CR deleted.")
+
+
 def _parse_values_keys(entries) -> dict[tuple[str, str], str]:
     overrides = {}
     for entry in entries:
@@ -95,7 +117,9 @@ def _parse_values_keys(entries) -> dict[tuple[str, str], str]:
 @click.option(
     "--assume-yes", "-y", "assume_yes", is_flag=True, default=False,
     help="Auto-confirm the proceed and revert-on-failure prompts (never the destructive "
-         "delete of App/Chart CRs). Combine with --values-key for a fully non-interactive run.",
+         "delete of App/Chart CRs — that's this command's own prompt; the sibling "
+         "`cleanup` command's -y does skip its delete prompt). Combine with --values-key "
+         "for a fully non-interactive run.",
 )
 @click.option(
     "--values-key", "values_key", multiple=True, metavar="KIND/NAME=KEY",
@@ -175,18 +199,11 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
 
     runner = migrator.MigrationRunner()
     console = Console(file=sys.stdout, highlight=False)
-    kube = (app.get("spec") or {}).get("kubeConfig") or {}
-    if kube.get("inCluster") is False:
-        secret = kube.get("secret") or {}
-        secret_name = secret.get("name", "")
-        secret_ns = secret.get("namespace") or namespace
-        try:
-            chart_api = migrator.load_wc_client(migrator.core_client(), secret_name, secret_ns)
-        except migrator.MigratorError as e:
-            click.echo(f"❌ {e}", err=True)
-            raise SystemExit(1)
-    else:
-        chart_api = api
+    try:
+        chart_api = _resolve_chart_api(api, app, namespace)
+    except migrator.MigratorError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
     steps = [
         migrator.DisableFluxReconcileApp(api, app),
         migrator.SuspendApp(api, app),
@@ -218,24 +235,83 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
             click.echo(f"✅ {step.description}")
 
     _section("Clean-up")
-    labels = (app.get("metadata") or {}).get("labels") or {}
-    is_flux_managed = (
-        migrator._FLUX_NAME_LABEL in labels
-        and migrator._FLUX_NS_LABEL in labels
-    )
-    if is_flux_managed:
-        click.echo(flux_cleanup_message(app))
+    if migrator.is_flux_managed(app):
+        click.echo(flux_cleanup_message(app, context))
     else:
         if click.confirm("Delete App CR and Chart CR?", default=False):
-            try:
-                delete_app_and_chart(api, chart_api, app)
-            except migrator.MigratorError as e:
-                click.echo(f"❌ {e}", err=True)
-                raise SystemExit(1)
-            click.echo("✅ App CR and Chart CR deleted.")
+            _delete_and_report(api, chart_api, app)
 
 
 cli.add_command(migrate_cmd, name="migrate")
+
+
+@cli.command()
+@click.option("--name", required=True)
+@click.option("--namespace", required=True)
+@click.option("--context", "context", default=None)
+@click.option("--dry-run", is_flag=True, default=False)
+@click.option(
+    "--assume-yes", "-y", "assume_yes", is_flag=True, default=False,
+    help="Auto-confirm the delete prompt. Skips no safety check.",
+)
+def cleanup_cmd(name, namespace, context, dry_run, assume_yes):
+    _section("Fetch")
+    try:
+        api = migrator.load_client(context)
+    except migrator.MigratorError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+
+    try:
+        app = api.get_namespaced_custom_object(
+            group=migrator._GROUP, version=migrator._VERSION,
+            namespace=namespace, plural=migrator._PLURAL, name=name,
+        )
+    except ApiException as e:
+        if e.status == 404:
+            click.echo(f"ℹ️  App {namespace}/{name} not found — nothing to clean up.")
+            raise SystemExit(0)
+        click.echo(
+            f"❌ failed to fetch App {namespace}/{name}: {migrator._api_message(e)}", err=True
+        )
+        raise SystemExit(1)
+
+    _section("Verify")
+    failures = verify_migration(api, app)
+    if failures:
+        for failure in failures:
+            click.echo(f"❌ {failure}", err=True)
+        raise SystemExit(1)
+    click.echo("✅ Migration verified — HelmRelease is ready and adopted.")
+
+    _section("Delete")
+    try:
+        chart_api = _resolve_chart_api(api, app, namespace)
+    except migrator.MigratorError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+
+    chart_name = migrator.chart_cr_name(app)
+    click.echo(
+        f"Will delete Chart {migrator._CHART_NAMESPACE}/{chart_name} and App {namespace}/{name}."
+    )
+    if migrator.is_flux_managed(app):
+        click.echo(
+            "⚠️  This does not verify the App CR was removed from your gitops repo. "
+            "If it is still there, Flux will re-apply it."
+        )
+
+    if dry_run:
+        click.echo("\n✅ Dry run complete — halting before deletion.")
+        raise SystemExit(0)
+
+    if not (assume_yes or click.confirm("Delete App CR and Chart CR?", default=False)):
+        raise SystemExit(0)
+
+    _delete_and_report(api, chart_api, app)
+
+
+cli.add_command(cleanup_cmd, name="cleanup")
 
 
 if __name__ == "__main__":

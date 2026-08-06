@@ -11,6 +11,7 @@ from . import (
     _PLURAL,
     _VERSION,
     _api_message,
+    is_flux_managed,
 )
 
 
@@ -20,8 +21,7 @@ class DisableFluxReconcileApp(MigrationStep):
         self._app = app
         self._did_disable_reconcile = False
         self._revert_note: str | None = None
-        labels = (app.get("metadata", {}).get("labels") or {})
-        self._is_flux_managed = _FLUX_NAME_LABEL in labels and _FLUX_NS_LABEL in labels
+        self._is_flux_managed = is_flux_managed(app)
 
     @property
     def description(self) -> str:

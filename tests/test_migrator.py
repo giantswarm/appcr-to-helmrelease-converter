@@ -5,7 +5,7 @@ import pytest
 
 from migrator import (
     DisableFluxReconcileApp, MigrationRunner, MigratorError, SuspendApp, SuspendChart,
-    chart_cr_name, load_client, load_wc_client,
+    chart_cr_name, is_flux_managed, load_client, load_wc_client,
 )
 from kubernetes.client.exceptions import ApiException
 from kubernetes.config.config_exception import ConfigException
@@ -396,6 +396,36 @@ class TestChartCRName:
     def test_no_labels_field_leaves_name_unchanged(self):
         app = {"metadata": {"name": "my-app"}}
         assert chart_cr_name(app) == "my-app"
+
+
+class TestIsFluxManaged:
+    def test_both_labels_present_is_true(self):
+        assert is_flux_managed(_APP_FLUX) is True
+
+    def test_reconcile_disabled_still_true(self):
+        assert is_flux_managed(_APP_FLUX_RECONCILE_DISABLED) is True
+
+    def test_only_name_label_is_false(self):
+        obj = {"metadata": {"labels": {"kustomize.toolkit.fluxcd.io/name": "my-app"}}}
+        assert is_flux_managed(obj) is False
+
+    def test_only_namespace_label_is_false(self):
+        obj = {"metadata": {"labels": {"kustomize.toolkit.fluxcd.io/namespace": "flux-system"}}}
+        assert is_flux_managed(obj) is False
+
+    def test_neither_label_is_false(self):
+        assert is_flux_managed(_APP) is False
+
+    def test_none_labels_is_false(self):
+        obj = {"metadata": {"labels": None}}
+        assert is_flux_managed(obj) is False
+
+    def test_missing_labels_key_is_false(self):
+        obj = {"metadata": {}}
+        assert is_flux_managed(obj) is False
+
+    def test_missing_metadata_is_false(self):
+        assert is_flux_managed({}) is False
 
 
 _APP_REMOTE = {

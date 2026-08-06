@@ -65,7 +65,10 @@ subsequent scripted runs of that app.
 - `migrate` can run fully unattended for Flux-managed apps: `--assume-yes` plus a
   `--values-key` for each ambiguous resource.
 - Irreversible CR deletion is never automated by a flag; it remains interactive (and, for
-  Flux-managed apps, out-of-band per ADR 0012).
+  Flux-managed apps, out-of-band per ADR 0012). _Amended by ADR 0027: this invariant is
+  scoped to `migrate`. The `cleanup` command's `-y` does skip its delete prompt — there,
+  deletion is the command's entire purpose rather than a trailing side effect, and it is
+  gated behind six verification checks that no flag can skip._
 - `resolver.resolve()` gains keyword-only `overrides` and `assume_yes` parameters and a new
   `ResolverError`; existing callers and the interactive path are unchanged when neither is
   passed.
