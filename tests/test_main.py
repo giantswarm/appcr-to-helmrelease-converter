@@ -198,6 +198,17 @@ class TestMigrateCommand:
             result = self._run(self._args(), input_text="y\ny\n")
         assert "failed to patch App" in result.output
 
+    def test_missing_chart_cr_hard_fails_instead_of_proceeding_to_apply(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        with patch("fetcher.fetch", return_value=_fetch_result()), \
+             patch("migrator.load_client", return_value=api), \
+             patch("migrator.apply_flux_resources.DynamicClient") as mock_dynamic:
+            result = self._run(self._args(), input_text="y\nn\n")
+        assert result.exit_code != 0
+        assert "failed to fetch Chart" in result.output
+        mock_dynamic.assert_not_called()
+
     def test_step_failure_asks_to_revert(self):
         api = MagicMock()
         api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
@@ -534,6 +545,8 @@ class TestMigrateCommand:
              patch("main.delete_app_and_chart", return_value=[note]):
             result = self._run(self._args(), input_text="y\ny\n")
         assert note in result.output
+        assert "✅ App CR and Chart CR deleted." not in result.output
+        assert "✅ App CR deleted." in result.output
 
     def test_non_flux_cleanup_failure_exits_nonzero(self):
         mock_api, fetch_result = self._successful_migration_mocks()
@@ -814,6 +827,8 @@ class TestCleanupCommand:
              patch("main.delete_app_and_chart", return_value=[note]):
             result = self._run(self._args() + ["--assume-yes"])
         assert note in result.output
+        assert "✅ App CR and Chart CR deleted." not in result.output
+        assert "✅ App CR deleted." in result.output
 
     def test_happy_path_prints_success(self):
         api = self._mock_api()
@@ -823,3 +838,107 @@ class TestCleanupCommand:
             result = self._run(self._args() + ["--assume-yes"])
         assert result.exit_code == 0
         assert "✅ App CR and Chart CR deleted." in result.output
+
+
+class TestSuspendCommand:
+    def _run(self, args=None):
+        return CliRunner().invoke(cli, ["suspend"] + (args or []))
+
+    def _args(self):
+        return ["--name", "my-app", "--namespace", "giantswarm"]
+
+    def _mock_api(self, app=None, chart_cr=None):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = [
+            app or _APP_DICT,
+            chart_cr if chart_cr is not None else {"metadata": {"name": "my-app", "namespace": "giantswarm"}},
+        ]
+        return api
+
+    def test_app_not_found_exits_zero(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+        assert "ℹ️" in result.output
+
+    def test_happy_path_pauses_app_and_chart_and_exits_zero(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+        assert "✅" in result.output
+        annotate_calls = [
+            c.kwargs["body"]["metadata"]["annotations"]
+            for c in api.patch_namespaced_custom_object.call_args_list
+        ]
+        assert {"app-operator.giantswarm.io/paused": "true"} in annotate_calls
+        assert {"chart-operator.giantswarm.io/paused": "true"} in annotate_calls
+
+    def test_already_paused_app_shows_already_set_not_checkmark(self):
+        app = {
+            **_APP_DICT,
+            "metadata": {**_APP_DICT["metadata"], "annotations": {"app-operator.giantswarm.io/paused": "true"}},
+        }
+        api = self._mock_api(app=app)
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+        assert "already set, nothing to do" in result.output
+
+    def test_chart_not_found_shows_skip_message(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = [_APP_DICT, ApiException(status=404)]
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+        assert "Chart CR giantswarm/my-app not found — skipped" in result.output
+
+    def test_step_failure_exits_nonzero(self):
+        api = self._mock_api()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403, reason="forbidden")
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+        assert "❌" in result.output
+
+    def test_load_client_failure_exits_nonzero(self):
+        with patch("migrator.load_client", side_effect=MigratorError("bad context")):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+        assert "bad context" in result.output
+
+    def _remote_app(self):
+        return {
+            **_APP_DICT,
+            "spec": {
+                **_APP_DICT["spec"],
+                "kubeConfig": {
+                    "inCluster": False,
+                    "secret": {"name": "my-cluster-kubeconfig", "namespace": "giantswarm"},
+                },
+            },
+        }
+
+    def test_remote_cluster_app_calls_load_wc_client(self):
+        api = self._mock_api(app=self._remote_app())
+        mock_wc_api = MagicMock()
+        mock_wc_api.get_namespaced_custom_object.return_value = {
+            "metadata": {"name": "my-app", "namespace": "giantswarm"}
+        }
+        with patch("migrator.load_client", return_value=api), \
+             patch("migrator.core_client", return_value=MagicMock()), \
+             patch("migrator.load_wc_client", return_value=mock_wc_api) as mock_load_wc:
+            result = self._run(self._args())
+        mock_load_wc.assert_called_once()
+        assert result.exit_code == 0
+
+    def test_load_wc_client_failure_exits_nonzero(self):
+        api = self._mock_api(app=self._remote_app())
+        with patch("migrator.load_client", return_value=api), \
+             patch("migrator.core_client", return_value=MagicMock()), \
+             patch("migrator.load_wc_client", side_effect=MigratorError("bad kubeconfig secret")):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+        assert "bad kubeconfig secret" in result.output

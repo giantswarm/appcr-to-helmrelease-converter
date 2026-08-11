@@ -513,6 +513,33 @@ class TestSuspendChart:
         with pytest.raises(MigratorError, match="failed to fetch Chart"):
             step.apply()
 
+    def test_apply_raises_migrator_error_on_missing_chart_by_default(self):
+        api = self._api()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        step = SuspendChart(api, _APP)
+        with pytest.raises(MigratorError, match="failed to fetch Chart"):
+            step.apply()
+
+    def test_apply_skips_when_chart_cr_not_found_and_tolerate_missing(self):
+        api = self._api()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        step = SuspendChart(api, _APP, tolerate_missing=True)
+        step.apply()
+        assert step.skipped is True
+        api.patch_namespaced_custom_object.assert_not_called()
+
+    def test_skip_message_names_the_missing_chart_cr(self):
+        api = self._api()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        step = SuspendChart(api, _APP, tolerate_missing=True)
+        step.apply()
+        assert "giantswarm/my-app" in step.skip_message
+
+    def test_skipped_is_false_when_chart_cr_found(self):
+        step = SuspendChart(self._api(), _APP)
+        step.apply()
+        assert step.skipped is False
+
     def test_apply_raises_migrator_error_on_patch_failure(self):
         api = self._api()
         api.patch_namespaced_custom_object.side_effect = ApiException(status=403)

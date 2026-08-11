@@ -103,6 +103,32 @@ For a remote-cluster app, `cleanup` also resolves the workload-cluster kubeconfi
 
 **`cleanup` never reads your gitops repository and cannot prove the App CR manifest was actually removed from it.** If it is still there, Flux re-applies the App CR after `cleanup` deletes it.
 
+### `suspend`
+
+```bash
+uv run python main.py suspend --name <app-name> --namespace <namespace>
+uv run python main.py suspend --name <app-name> --namespace <namespace> --context <kubeconfig-context>
+```
+
+Standalone utility, not a migration phase: pauses app-operator/chart-operator reconciliation on the App CR and its Chart CR — the same two paused annotations `migrate` sets as part of its own Suspend step — without running any of `migrate`'s conversion, apply, or monitor logic. Useful when you want reconciliation paused ahead of time, independent of running a full migration through this tool.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--name` | Name of the App CR (required) |
+| `--namespace` | Namespace of the App CR (required) |
+| `--context` | kubeconfig context to use (default: current context) |
+
+No `--dry-run` or `--assume-yes`: both steps just set an annotation if it isn't already set, so there's nothing destructive to preview or confirm. A failed run can simply be re-run once the underlying issue (e.g. a permissions error) is fixed.
+
+**What it does:**
+
+1. Annotates the App CR with `app-operator.giantswarm.io/paused: "true"` (skipped if already set)
+2. Annotates the Chart CR with `chart-operator.giantswarm.io/paused: "true"` (skipped if already set, or if the Chart CR doesn't exist — an app that was never installed has nothing to pause)
+
+If the App CR itself isn't found, `suspend` exits cleanly with nothing to do. For a remote-cluster app, it resolves the workload-cluster kubeconfig the same way `migrate`/`cleanup` do.
+
 ## What gets generated
 
 Depending on the Catalog type:
