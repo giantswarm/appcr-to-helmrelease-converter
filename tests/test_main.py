@@ -509,6 +509,7 @@ class TestMigrateCommand:
              patch("migrator.apply_flux_resources.DynamicClient"), \
              patch("migrator.monitor_helm_release.time.sleep"):
             result = self._run(self._args(), input_text="y\n")
+        assert "python main.py cleanup --name my-app --namespace giantswarm" in result.output
         assert "operatorkit.giantswarm.io/app-operator-app" in result.output
         assert "operatorkit.giantswarm.io/chart-operator-chart" in result.output
 
@@ -518,10 +519,21 @@ class TestMigrateCommand:
              patch("migrator.load_client", return_value=mock_api), \
              patch("migrator.apply_flux_resources.DynamicClient"), \
              patch("migrator.monitor_helm_release.time.sleep"), \
-             patch("main.delete_app_and_chart") as mock_delete:
+             patch("main.delete_app_and_chart", return_value=[]) as mock_delete:
             result = self._run(self._args(), input_text="y\ny\n")
         mock_delete.assert_called_once_with(mock_api, mock_api, fetch_result.app)
         assert "✅ App CR and Chart CR deleted." in result.output
+
+    def test_non_flux_cleanup_prints_notes_from_delete(self):
+        mock_api, fetch_result = self._successful_migration_mocks()
+        note = "Chart giantswarm/my-app not found — skipped, nothing to delete."
+        with patch("fetcher.fetch", return_value=fetch_result), \
+             patch("migrator.load_client", return_value=mock_api), \
+             patch("migrator.apply_flux_resources.DynamicClient"), \
+             patch("migrator.monitor_helm_release.time.sleep"), \
+             patch("main.delete_app_and_chart", return_value=[note]):
+            result = self._run(self._args(), input_text="y\ny\n")
+        assert note in result.output
 
     def test_non_flux_cleanup_failure_exits_nonzero(self):
         mock_api, fetch_result = self._successful_migration_mocks()
@@ -529,7 +541,7 @@ class TestMigrateCommand:
              patch("migrator.load_client", return_value=mock_api), \
              patch("migrator.apply_flux_resources.DynamicClient"), \
              patch("migrator.monitor_helm_release.time.sleep"), \
-             patch("main.delete_app_and_chart", side_effect=MigratorError("delete failed")):
+             patch("main.delete_app_and_chart", side_effect=MigratorError("delete failed"), return_value=[]):
             result = self._run(self._args(), input_text="y\ny\n")
         assert result.exit_code != 0
         assert "delete failed" in result.output
@@ -622,6 +634,192 @@ class TestNonInteractiveFlags:
              patch("migrator.load_client", return_value=self._ready_api()), \
              patch("migrator.apply_flux_resources.DynamicClient"), \
              patch("migrator.monitor_helm_release.time.sleep"), \
-             patch("main.delete_app_and_chart") as mock_delete:
+             patch("main.delete_app_and_chart", return_value=[]) as mock_delete:
             self._run(self._args() + ["--assume-yes"], input_text="n\n")
         mock_delete.assert_not_called()
+
+
+class TestCleanupCommand:
+    def _run(self, args=None, input_text=None):
+        return CliRunner().invoke(cli, ["cleanup"] + (args or []), input=input_text)
+
+    def _args(self):
+        return ["--name", "my-app", "--namespace", "giantswarm"]
+
+    def _mock_api(self, app=None):
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = app or _APP_DICT
+        return api
+
+    def test_app_not_found_exits_zero(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+
+    def test_app_not_found_prints_info_and_skips_delete(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.delete_app_and_chart") as mock_delete:
+            result = self._run(self._args())
+        assert "ℹ️" in result.output
+        mock_delete.assert_not_called()
+
+    def test_app_fetch_other_error_exits_nonzero(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=500, reason="boom")
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+        assert "❌" in result.output
+        assert "boom" in result.output
+
+    def test_load_client_failure_exits_nonzero(self):
+        with patch("migrator.load_client", side_effect=MigratorError("bad context")):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+        assert "bad context" in result.output
+
+    def test_verification_failure_exits_nonzero_and_prints_all_failures(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=["failure one", "failure two"]), \
+             patch("main.delete_app_and_chart") as mock_delete:
+            result = self._run(self._args())
+        assert result.exit_code != 0
+        assert "failure one" in result.output
+        assert "failure two" in result.output
+        mock_delete.assert_not_called()
+
+    def test_verification_success_prints_checkmark(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.delete_app_and_chart", return_value=[]):
+            result = self._run(self._args() + ["--dry-run"])
+        assert "✅" in result.output
+
+    def test_dry_run_exits_zero_without_deleting(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.delete_app_and_chart") as mock_delete:
+            result = self._run(self._args() + ["--dry-run"])
+        assert result.exit_code == 0
+        assert "Dry run complete" in result.output
+        mock_delete.assert_not_called()
+
+    def test_dry_run_shows_what_will_be_deleted(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]):
+            result = self._run(self._args() + ["--dry-run"])
+        assert "Chart giantswarm/my-app" in result.output
+        assert "App giantswarm/my-app" in result.output
+
+    def test_flux_managed_app_shows_gitops_warning(self):
+        api = self._mock_api(app=_APP_DICT_FLUX)
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]):
+            result = self._run(self._args() + ["--dry-run"])
+        assert "gitops" in result.output.lower()
+
+    def test_non_flux_app_shows_no_gitops_warning(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]):
+            result = self._run(self._args() + ["--dry-run"])
+        assert "gitops" not in result.output.lower()
+
+    def test_prompt_declined_exits_zero_without_deleting(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.delete_app_and_chart") as mock_delete:
+            result = self._run(self._args(), input_text="n\n")
+        assert result.exit_code == 0
+        mock_delete.assert_not_called()
+
+    def test_prompt_confirmed_deletes(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.delete_app_and_chart", return_value=[]) as mock_delete:
+            result = self._run(self._args(), input_text="y\n")
+        assert result.exit_code == 0
+        mock_delete.assert_called_once_with(api, api, _APP_DICT)
+
+    def test_assume_yes_deletes_without_prompting(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.delete_app_and_chart", return_value=[]) as mock_delete:
+            result = self._run(self._args() + ["--assume-yes"])  # no input supplied
+        assert result.exit_code == 0
+        mock_delete.assert_called_once()
+
+    def _remote_app(self):
+        return {
+            **_APP_DICT,
+            "spec": {
+                **_APP_DICT["spec"],
+                "kubeConfig": {
+                    "inCluster": False,
+                    "secret": {"name": "my-cluster-kubeconfig", "namespace": "giantswarm"},
+                },
+            },
+        }
+
+    def test_remote_cluster_app_calls_load_wc_client(self):
+        api = self._mock_api(app=self._remote_app())
+        mock_wc_api = MagicMock()
+        with patch("migrator.load_client", return_value=api), \
+             patch("migrator.core_client", return_value=MagicMock()), \
+             patch("migrator.load_wc_client", return_value=mock_wc_api) as mock_load_wc, \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.delete_app_and_chart", return_value=[]) as mock_delete:
+            result = self._run(self._args() + ["--assume-yes"])
+        mock_load_wc.assert_called_once()
+        mock_delete.assert_called_once_with(api, mock_wc_api, self._remote_app())
+        assert result.exit_code == 0
+
+    def test_load_wc_client_failure_exits_nonzero_before_delete(self):
+        api = self._mock_api(app=self._remote_app())
+        with patch("migrator.load_client", return_value=api), \
+             patch("migrator.core_client", return_value=MagicMock()), \
+             patch("migrator.load_wc_client", side_effect=MigratorError("bad kubeconfig secret")), \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.delete_app_and_chart") as mock_delete:
+            result = self._run(self._args() + ["--assume-yes"])
+        assert result.exit_code != 0
+        assert "bad kubeconfig secret" in result.output
+        mock_delete.assert_not_called()
+
+    def test_delete_failure_exits_nonzero(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.delete_app_and_chart", side_effect=MigratorError("delete failed")):
+            result = self._run(self._args() + ["--assume-yes"])
+        assert result.exit_code != 0
+        assert "delete failed" in result.output
+
+    def test_notes_from_delete_are_printed(self):
+        api = self._mock_api()
+        note = "Chart giantswarm/my-app not found — skipped, nothing to delete."
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.delete_app_and_chart", return_value=[note]):
+            result = self._run(self._args() + ["--assume-yes"])
+        assert note in result.output
+
+    def test_happy_path_prints_success(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api), \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.delete_app_and_chart", return_value=[]):
+            result = self._run(self._args() + ["--assume-yes"])
+        assert result.exit_code == 0
+        assert "✅ App CR and Chart CR deleted." in result.output

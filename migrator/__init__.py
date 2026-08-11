@@ -90,6 +90,11 @@ def chart_cr_name(app_dict: dict) -> str:
     return name
 
 
+def is_flux_managed(obj: dict) -> bool:
+    labels = (obj.get("metadata") or {}).get("labels") or {}
+    return _FLUX_NAME_LABEL in labels and _FLUX_NS_LABEL in labels
+
+
 def core_client() -> client.CoreV1Api:
     return client.CoreV1Api()
 

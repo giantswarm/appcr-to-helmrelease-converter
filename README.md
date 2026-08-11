@@ -34,7 +34,7 @@ uv run python main.py migrate --name <app-name> --namespace <namespace> --contex
 | `--context` | kubeconfig context to use (default: current context) |
 | `--dry-run` | Stop after showing the generated Flux YAML — no cluster mutations |
 | `--output FILE` | Write the generated Flux YAML to a file (independent of `--dry-run`) |
-| `--assume-yes` / `-y` | Auto-confirm the proceed and revert-on-failure prompts. Never auto-confirms the destructive delete of App/Chart CRs. |
+| `--assume-yes` / `-y` | Auto-confirm the proceed and revert-on-failure prompts. For `migrate`, never auto-confirms the destructive delete of App/Chart CRs — see the `cleanup` command below, where `-y` does skip that prompt. |
 | `--values-key KIND/NAME=KEY` | Pre-answer the `valuesKey` prompt for a multi-key ConfigMap/Secret (e.g. `ConfigMap/my-cm=values.yaml`). Repeatable. |
 
 **Example — preview before committing:**
@@ -66,8 +66,42 @@ The tool will:
 6. Apply the new Flux resources to the cluster
 7. Watch the HelmRelease until it becomes ready — on failure, asks whether to roll back. If any suspend step found the App CR or Chart CR _already_ paused before this run, a note with the matching `kubectl` command is printed so you can undo that state manually if needed
 8. Clean up the now-redundant App CR and Chart CR:
-   - **Flux-managed app:** prints the reason and kubectl commands to remove finalizers and delete both CRs (Chart CR first). You must commit the generated Flux resources to your gitops repo and remove the App CR from it _before_ running those commands, otherwise the Kustomization will recreate it.
+   - **Flux-managed app:** prints the exact `uv run python main.py cleanup ...` command to run — the recommended path, once you've committed the generated Flux resources to your gitops repo and removed the App CR from it. The kubectl commands to remove finalizers and delete both CRs (Chart CR first) are still printed underneath as a manual fallback.
    - **Non-Flux-managed app:** prompts `y/N` to delete both CRs automatically (Chart CR first, App CR second).
+
+### `cleanup`
+
+```bash
+uv run python main.py cleanup --name <app-name> --namespace <namespace>
+uv run python main.py cleanup --name <app-name> --namespace <namespace> --dry-run
+```
+
+Phase two of the migration: run once the converted resources have been committed to your gitops repository and the App CR removed from it. Verifies the migration actually completed and that Flux has adopted the HelmRelease, then deletes the now-redundant App CR and Chart CR.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--name` | Name of the App CR (required) |
+| `--namespace` | Namespace of the App CR (required) |
+| `--context` | kubeconfig context to use (default: current context) |
+| `--dry-run` | Run every check and stop — no deletions |
+| `--assume-yes` / `-y` | Auto-confirm the deletion prompt. Never skips a check. |
+
+**What it checks:**
+
+1. A HelmRelease exists at the App CR's own name/namespace
+2. The HelmRelease is `Ready`
+3. The HelmRelease is not suspended
+4. The HelmRelease's observed generation matches its current generation (not describing a stale revision)
+5. _(Flux-managed App CRs only)_ The HelmRelease carries Flux's kustomize labels — proof gitops has adopted it
+6. _(Flux-managed App CRs only)_ The App CR has Flux reconciliation disabled — proof Flux won't recreate it once deleted
+
+If any check fails, `cleanup` reports every failure and exits non-zero without deleting anything.
+
+For a remote-cluster app, `cleanup` also resolves the workload-cluster kubeconfig (same as `migrate`) to delete the Chart CR there — a `--dry-run` therefore also proves that kubeconfig is reachable.
+
+**`cleanup` never reads your gitops repository and cannot prove the App CR manifest was actually removed from it.** If it is still there, Flux re-applies the App CR after `cleanup` deletes it.
 
 ## What gets generated
 
