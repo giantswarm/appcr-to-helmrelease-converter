@@ -942,3 +942,93 @@ class TestSuspendCommand:
             result = self._run(self._args())
         assert result.exit_code != 0
         assert "bad kubeconfig secret" in result.output
+
+
+class TestResumeCommand:
+    def _run(self, args=None):
+        return CliRunner().invoke(cli, ["resume"] + (args or []))
+
+    def _args(self):
+        return ["--name", "my-app", "--namespace", "giantswarm"]
+
+    def _mock_api(self, app=None):
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = app or _APP_DICT
+        return api
+
+    def test_happy_path_unpauses_app_and_chart_and_exits_zero(self):
+        api = self._mock_api()
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+        assert "✅" in result.output
+        annotate_calls = [
+            c.kwargs["body"]["metadata"]["annotations"]
+            for c in api.patch_namespaced_custom_object.call_args_list
+        ]
+        assert {"app-operator.giantswarm.io/paused": None} in annotate_calls
+        assert {"chart-operator.giantswarm.io/paused": None} in annotate_calls
+
+    def test_app_not_found_exits_zero(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+        assert "ℹ️" in result.output
+
+    def test_chart_not_found_shows_skip_note_and_app_only_message(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = _APP_DICT
+        api.patch_namespaced_custom_object.side_effect = [None, ApiException(status=404)]
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code == 0
+        assert "Chart giantswarm/my-app not found — skipped, nothing to resume." in result.output
+        assert "✅ App CR unpaused." in result.output
+        assert "✅ App CR and Chart CR unpaused." not in result.output
+
+    def test_step_failure_exits_nonzero(self):
+        api = self._mock_api()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=403, reason="forbidden")
+        with patch("migrator.load_client", return_value=api):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+        assert "❌" in result.output
+
+    def test_load_client_failure_exits_nonzero(self):
+        with patch("migrator.load_client", side_effect=MigratorError("bad context")):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+        assert "bad context" in result.output
+
+    def _remote_app(self):
+        return {
+            **_APP_DICT,
+            "spec": {
+                **_APP_DICT["spec"],
+                "kubeConfig": {
+                    "inCluster": False,
+                    "secret": {"name": "my-cluster-kubeconfig", "namespace": "giantswarm"},
+                },
+            },
+        }
+
+    def test_remote_cluster_app_calls_load_wc_client(self):
+        api = self._mock_api(app=self._remote_app())
+        mock_wc_api = MagicMock()
+        with patch("migrator.load_client", return_value=api), \
+             patch("migrator.core_client", return_value=MagicMock()), \
+             patch("migrator.load_wc_client", return_value=mock_wc_api) as mock_load_wc:
+            result = self._run(self._args())
+        mock_load_wc.assert_called_once()
+        assert result.exit_code == 0
+
+    def test_load_wc_client_failure_exits_nonzero(self):
+        api = self._mock_api(app=self._remote_app())
+        with patch("migrator.load_client", return_value=api), \
+             patch("migrator.core_client", return_value=MagicMock()), \
+             patch("migrator.load_wc_client", side_effect=MigratorError("bad kubeconfig secret")):
+            result = self._run(self._args())
+        assert result.exit_code != 0
+        assert "bad kubeconfig secret" in result.output

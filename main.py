@@ -15,6 +15,7 @@ import resolver
 from converter import convert
 from fetcher import FetchError
 from migrator.cleanup import delete_app_and_chart, flux_cleanup_message, verify_migration
+from migrator.resume import resume_app_and_chart
 from preflight import PreflightError, run_preflight
 
 
@@ -136,6 +137,20 @@ def _delete_and_report(api, chart_api, app: dict) -> None:
         click.echo("✅ App CR deleted.")
     else:
         click.echo("✅ App CR and Chart CR deleted.")
+
+
+def _resume_and_report(api, chart_api, app: dict) -> None:
+    try:
+        notes = resume_app_and_chart(api, chart_api, app)
+    except migrator.MigratorError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+    for note in notes:
+        click.echo(f"ℹ️  {note}")
+    if notes:
+        click.echo("✅ App CR unpaused.")
+    else:
+        click.echo("✅ App CR and Chart CR unpaused.")
 
 
 def _parse_values_keys(entries) -> dict[tuple[str, str], str]:
@@ -359,6 +374,29 @@ def suspend_cmd(name, namespace, context):
 
 
 cli.add_command(suspend_cmd, name="suspend")
+
+
+@cli.command()
+@click.option("--name", required=True)
+@click.option("--namespace", required=True)
+@click.option("--context", "context", default=None)
+def resume_cmd(name, namespace, context):
+    _section("Fetch")
+    api = _load_client_or_exit(context)
+
+    app = _get_app_or_exit(
+        api, namespace, name,
+        f"App {namespace}/{name} not found — nothing to resume "
+        f"(can't look up the Chart CR without it).",
+    )
+
+    _section("Resume")
+    chart_api = _resolve_chart_api_or_exit(api, app)
+
+    _resume_and_report(api, chart_api, app)
+
+
+cli.add_command(resume_cmd, name="resume")
 
 
 if __name__ == "__main__":

@@ -37,4 +37,4 @@
 
 **Chart CR 404 tolerance, still needed despite no precheck.** Even without a GET-first check, the PATCH call itself 404s if the Chart CR doesn't exist — you can't patch a resource that isn't there, unlike clearing an annotation on one that exists but never had it set. `resume_app_and_chart` catches that 404 specifically and adds a skip note (mirroring `delete_app_and_chart`'s existing Chart-CR-not-found note), rather than raising.
 
-**Not yet implemented.** This section records the design; implementation follows via TDD in a separate pass, tracked as CLAUDE.md backlog item 23.
+**Implemented as designed.** See CLAUDE.md backlog item 23.
