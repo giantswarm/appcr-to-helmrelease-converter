@@ -129,6 +129,34 @@ No `--dry-run` or `--assume-yes`: both steps just set an annotation if it isn't 
 
 If the App CR itself isn't found, `suspend` exits cleanly with nothing to do. For a remote-cluster app, it resolves the workload-cluster kubeconfig the same way `migrate`/`cleanup` do.
 
+### `resume`
+
+```bash
+uv run python main.py resume --name <app-name> --namespace <namespace>
+uv run python main.py resume --name <app-name> --namespace <namespace> --context <kubeconfig-context>
+```
+
+The inverse of `suspend`: clears the same two paused annotations instead of setting them, so app-operator/chart-operator reconciliation resumes. Same standalone scope as `suspend` — no conversion, apply, or monitor logic runs.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--name` | Name of the App CR (required) |
+| `--namespace` | Namespace of the App CR (required) |
+| `--context` | kubeconfig context to use (default: current context) |
+
+No `--dry-run` or `--assume-yes`, for the same reason as `suspend`: clearing an annotation is idempotent and non-destructive.
+
+**What it does:**
+
+1. Clears `app-operator.giantswarm.io/paused` from the App CR
+2. Clears `chart-operator.giantswarm.io/paused` from the Chart CR (skipped if the Chart CR doesn't exist — nothing to resume)
+
+Unlike `suspend`, `resume` doesn't check current annotation state before acting — clearing an annotation that's already absent is a harmless no-op — so it reports the same outcome whether or not anything was actually paused to begin with.
+
+If the App CR itself isn't found, `resume` exits cleanly with nothing to do. For a remote-cluster app, it resolves the workload-cluster kubeconfig the same way `migrate`/`cleanup`/`suspend` do.
+
 ## What gets generated
 
 Depending on the Catalog type:
