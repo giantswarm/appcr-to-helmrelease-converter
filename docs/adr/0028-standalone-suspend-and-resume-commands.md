@@ -1,4 +1,4 @@
-# Standalone `suspend` command
+# Standalone `suspend` and `resume` commands
 
 `migrate` bundles three concerns into one "Suspend" section — `DisableFluxReconcileApp`, `SuspendApp`, `SuspendChart` — followed by apply and monitor. There's no way to pause app-operator/chart-operator reconciliation on an App CR and its Chart CR without going through the rest of `migrate`.
 
@@ -22,3 +22,19 @@
 2. See "Delete messaging fix" below — `_delete_and_report` is shared by `cleanup` and `migrate`'s own non-Flux delete-confirmation path, so this fix applies to both.
 
 **Delete messaging fix.** `_delete_and_report` used to print "✅ App CR and Chart CR deleted." unconditionally, even when `delete_app_and_chart`'s notes said the Chart CR was skipped because it didn't exist — a directly contradictory pair of lines. It now prints "✅ App CR deleted." whenever any notes were returned (today the only note this function can produce is exactly that skip), and the full "and Chart CR deleted" line only when nothing was skipped.
+
+## `resume` — the inverse of `suspend`
+
+**Decision: add a `resume` command that clears the same two annotations `suspend` sets.** CONTEXT.md now defines **Resume** as the inverse of **Suspension**. Same targeting flags as `suspend` — `--name`/`--namespace`/`--context` only, no `--dry-run`, no `--assume-yes`, no confirmation prompt — for the identical reasoning: clearing an idempotent annotation is low-stakes enough that none of those earn their keep. Same scope exclusion too: `resume` never touches the kustomize `reconcile: disabled` label `DisableFluxReconcileApp` sets, because `Suspension` (and therefore its inverse) was never defined to include that label — it's a separate, Flux-specific concern (see the "Scope excludes `DisableFluxReconcileApp`" note above).
+
+**Rejected: reusing `MigrationStep.revert()`.** The obvious first instinct — build fresh `SuspendApp`/`SuspendChart` instances and call `.revert()` — doesn't work. `revert()` is guarded by `if not self._did_pause: return`, and `_did_pause` is only set inside `apply()` when *that same instance* actually performed the pause. A `resume` command's step instances never call `apply()`, so `_did_pause` is always `False` and `revert()` would silently no-op on every run — the command would report nothing changed while actually not touching the cluster at all.
+
+**Rejected: a `force: bool` param on `revert()`.** Bypassing the `_did_pause` guard with `force=True` just moves the problem: `revert(force=True)` can no longer trust `_did_pause` to know "is this actually paused right now," so it would need its own live-state check anyway — re-fetching the Chart CR the same way `apply()` does, purely to decide skip-vs-patch. That's the same amount of new logic as a standalone implementation, just grafted onto a method whose contract ("undo what this run just did") doesn't otherwise match "make sure this isn't paused, regardless of history."
+
+**Decision: standalone functions in a new `migrator/resume.py`, not `MigrationStep` subclasses.** Mirrors `migrator/cleanup.py`'s existing pattern (`delete_app_and_chart`, `verify_migration`) — plain functions outside the `MigrationStep` framework, because `resume`, like `cleanup`, needs none of `apply`/`revert`/`skipped`/`description` or `MigrationRunner`. A single `resume_app_and_chart(api, chart_api, app) -> list[str]` unpauses both and returns notes, raising `MigratorError` only on a real failure — same shape as `delete_app_and_chart`.
+
+**No live-state precheck before patching.** `suspend` checks current annotation state first so it can distinguish "✅ paused" from "ℹ️ already paused, nothing to do." `resume` skips that check and unconditionally issues the patch to clear each annotation: a JSON merge patch removing an already-absent key is a harmless no-op on the API side, so there's nothing incorrect about firing it regardless of current state. The tradeoff, accepted deliberately: `resume` cannot tell "just unpaused" apart from "was already unpaused" and reports one message either way (e.g. "✅ App CR unpaused.") rather than mirroring `suspend`'s two-message split.
+
+**Chart CR 404 tolerance, still needed despite no precheck.** Even without a GET-first check, the PATCH call itself 404s if the Chart CR doesn't exist — you can't patch a resource that isn't there, unlike clearing an annotation on one that exists but never had it set. `resume_app_and_chart` catches that 404 specifically and adds a skip note (mirroring `delete_app_and_chart`'s existing Chart-CR-not-found note), rather than raising.
+
+**Not yet implemented.** This section records the design; implementation follows via TDD in a separate pass, tracked as CLAUDE.md backlog item 23.
