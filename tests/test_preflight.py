@@ -515,3 +515,11 @@ class TestCheckPullSecret:
             _APP_IN_NS, _CATALOG_OCI, pull_secret_name="regcred", pull_secret=_BASIC_AUTH_SECRET
         )
         assert any(isinstance(i, PreflightWarning) and "regcred" in str(i) for i in issues)
+
+    def test_dockerconfigjson_secret_passes_storage_style_oci_catalog(self):
+        assert check_pull_secret(_APP_IN_NS, _CATALOG_STORAGE_OCI, "regcred", _DOCKER_SECRET) == []
+
+    def test_basic_auth_secret_warns_on_storage_style_oci_catalog(self):
+        issues = check_pull_secret(_APP_IN_NS, _CATALOG_STORAGE_OCI, "regcred", _BASIC_AUTH_SECRET)
+        assert isinstance(issues[0], PreflightWarning)
+        assert "kubernetes.io/dockerconfigjson" in str(issues[0])
