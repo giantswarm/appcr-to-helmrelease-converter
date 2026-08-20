@@ -36,6 +36,7 @@ uv run python main.py migrate --name <app-name> --namespace <namespace> --contex
 | `--output FILE` | Write the generated Flux YAML to a file (independent of `--dry-run`) |
 | `--assume-yes` / `-y` | Auto-confirm the proceed and revert-on-failure prompts. For `migrate`, never auto-confirms the destructive delete of App/Chart CRs — see the `cleanup` command below, where `-y` does skip that prompt. |
 | `--values-key KIND/NAME=KEY` | Pre-answer the `valuesKey` prompt for a multi-key ConfigMap/Secret (e.g. `ConfigMap/my-cm=values.yaml`). Repeatable. |
+| `--pull-secret NAME` | Name of an existing Secret holding catalog credentials. Emitted as `spec.secretRef` on the generated OCIRepository or HelmRepository. Must be in the App CR's namespace — Flux does not resolve it across namespaces. |
 
 **Example — preview before committing:**
 
@@ -49,6 +50,14 @@ uv run python main.py migrate --name loki --namespace monitoring --dry-run --out
 uv run python main.py migrate --name loki --namespace monitoring
 ```
 
+**Example — private catalog:**
+
+```bash
+uv run python main.py migrate --name loki --namespace monitoring --pull-secret regcred
+```
+
+The Secret must already exist in the App CR's namespace; the tool checks but never creates it. A missing Secret is a hard error. The two source kinds expect different Secret shapes — an OCIRepository wants a `kubernetes.io/dockerconfigjson` Secret (`kubectl create secret docker-registry`), a HelmRepository wants `username` and `password` data keys — and a mismatch is a warning, not an error, so you can proceed when your registry's rules differ from the check.
+
 **Example — unattended run** (discover the keys interactively once, then replay):
 
 ```bash
@@ -59,7 +68,7 @@ uv run python main.py migrate --name loki --namespace monitoring \
 The tool will:
 
 1. Fetch the App CR and its Catalog CR from the cluster
-2. Run preflight checks — including verifying that any `depends-on` dependencies exist as HelmReleases — and print any warnings
+2. Run preflight checks — including verifying that any `depends-on` dependencies exist as HelmReleases, and that a `--pull-secret` Secret exists in the App CR's namespace — and print any warnings
 3. Resolve `valuesKey` for each ConfigMap/Secret referenced by the app — prompts you to choose when a resource has multiple data keys (or takes the value from `--values-key`; with `--assume-yes` an unresolved multi-key resource is a hard error naming the flag to pass). A resource with zero data keys is never an error: it's carried into `valuesFrom` as `optional: true` with a warning, instead
 4. Show you the generated Flux YAML (and save it if `--output` is set), then ask for confirmation (skipped by `--assume-yes`)
 5. Suspend the App CR (and its Chart CR on the workload cluster if applicable)

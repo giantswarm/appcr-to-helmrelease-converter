@@ -19,6 +19,7 @@ class FetchResult:
     catalog: dict
     referenced_configs: dict = field(default_factory=dict)
     dependency_helm_releases: dict = field(default_factory=dict)
+    pull_secret: dict | None = None
 
 
 def _api_message(e: ApiException) -> str:
@@ -28,7 +29,9 @@ def _api_message(e: ApiException) -> str:
         return e.reason or str(e.status)
 
 
-def fetch(name: str, namespace: str, context: str | None = None) -> FetchResult:
+def fetch(
+    name: str, namespace: str, context: str | None = None, pull_secret: str | None = None
+) -> FetchResult:
     try:
         config.load_kube_config(context=context)
     except ConfigException as e:
@@ -74,11 +77,15 @@ def fetch(name: str, namespace: str, context: str | None = None) -> FetchResult:
     core_api = client.CoreV1Api()
     referenced_configs = _fetch_referenced_configs(app, core_api)
     dependency_helm_releases = _fetch_dependency_helm_releases(api, app, namespace)
+    pull_secret_obj = (
+        _fetch_one(core_api, "Secret", pull_secret, namespace) if pull_secret else None
+    )
     return FetchResult(
         app=app,
         catalog=catalog,
         referenced_configs=referenced_configs,
         dependency_helm_releases=dependency_helm_releases,
+        pull_secret=pull_secret_obj,
     )
 
 

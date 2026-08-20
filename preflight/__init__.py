@@ -1,3 +1,4 @@
+from converter import catalog_has_oci
 from converter.values_from import is_psp_removal_patch
 
 
@@ -54,10 +55,7 @@ def check_empty_values_from_names(app: dict, catalog: dict) -> list[PreflightIss
 
 
 def check_oci_fallback(app: dict, catalog: dict) -> list[PreflightIssue]:
-    spec = catalog.get("spec") or {}
-    has_oci = any(r.get("type") == "oci" for r in (spec.get("repositories") or [])) \
-        or (spec.get("storage") or {}).get("type") == "oci"
-    if not has_oci:
+    if not catalog_has_oci(catalog):
         return [PreflightWarning(
             "catalog has no OCI repository; conversion will use HelmRepository (deprecated by Flux — "
             "no new features; OCI is the preferred source type)"
@@ -142,6 +140,39 @@ def check_cross_namespace_refs(app: dict, catalog: dict, referenced_configs: dic
     ]
 
 
+_DOCKER_SECRET_TYPES = {"kubernetes.io/dockerconfigjson", "kubernetes.io/dockercfg"}
+
+
+def check_pull_secret(
+    app: dict, catalog: dict, pull_secret_name: str | None, pull_secret: dict | None
+) -> list[PreflightIssue]:
+    if not pull_secret_name:
+        return []
+    app_ns = app.get("metadata", {}).get("namespace", "")
+    if pull_secret is None:
+        return [PreflightError(
+            f'Secret "{pull_secret_name}" not found in namespace "{app_ns}"; '
+            "Flux requires the pull secret to be in the same namespace as the source resource"
+        )]
+    if catalog_has_oci(catalog):
+        secret_type = pull_secret.get("type")
+        if secret_type not in _DOCKER_SECRET_TYPES:
+            return [PreflightWarning(
+                f'Secret "{pull_secret_name}" has type "{secret_type}"; an OCIRepository expects a '
+                "kubernetes.io/dockerconfigjson or kubernetes.io/dockercfg Secret "
+                "(kubectl create secret docker-registry). Authentication may fail at reconcile time"
+            )]
+        return []
+    missing = [k for k in ("username", "password") if k not in (pull_secret.get("data") or {})]
+    if missing:
+        return [PreflightWarning(
+            f'Secret "{pull_secret_name}" is missing data key(s) {", ".join(missing)}; '
+            "a HelmRepository expects basic-auth credentials in username and password. "
+            "Authentication may fail at reconcile time"
+        )]
+    return []
+
+
 _CHECKS = [
     check_kube_config,
     check_namespace_config,
@@ -164,6 +195,8 @@ def run_preflight(
     catalog: dict,
     referenced_configs: dict | None = None,
     dependency_helm_releases: dict | None = None,
+    pull_secret_name: str | None = None,
+    pull_secret: dict | None = None,
 ) -> list[PreflightIssue]:
     refs = referenced_configs or {}
     deps = dependency_helm_releases or {}
@@ -171,4 +204,5 @@ def run_preflight(
         [issue for check in _CHECKS for issue in check(app, catalog)]
         + [issue for check in _REFS_CHECKS for issue in check(app, catalog, refs)]
         + check_dependency_helm_releases(app, catalog, deps)
+        + check_pull_secret(app, catalog, pull_secret_name, pull_secret)
     )

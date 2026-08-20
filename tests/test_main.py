@@ -9,12 +9,14 @@ from migrator import MigratorError
 from main import cli
 
 
-def _fetch_result(app=None, catalog=None, referenced_configs=None, dependency_helm_releases=None):
+def _fetch_result(app=None, catalog=None, referenced_configs=None, dependency_helm_releases=None,
+                  pull_secret=None):
     return FetchResult(
         app=app or _APP_DICT,
         catalog=catalog or _CATALOG_DICT,
         referenced_configs=referenced_configs or {},
         dependency_helm_releases=dependency_helm_releases or {},
+        pull_secret=pull_secret,
     )
 
 
@@ -269,12 +271,12 @@ class TestMigrateCommand:
     def test_context_forwarded_to_fetcher(self):
         with patch("fetcher.fetch", return_value=_fetch_result()) as mock_fetch:
             self._run(self._args() + ["--context", "my-context"], input_text="n\n")
-        mock_fetch.assert_called_once_with("my-app", "giantswarm", "my-context")
+        mock_fetch.assert_called_once_with("my-app", "giantswarm", "my-context", None)
 
     def test_no_context_passes_none_to_fetcher(self):
         with patch("fetcher.fetch", return_value=_fetch_result()) as mock_fetch:
             self._run(self._args(), input_text="n\n")
-        mock_fetch.assert_called_once_with("my-app", "giantswarm", None)
+        mock_fetch.assert_called_once_with("my-app", "giantswarm", None, None)
 
     def test_section_headers_appear_in_output(self):
         with patch("fetcher.fetch", return_value=_fetch_result()):
@@ -823,3 +825,46 @@ class TestCleanupCommand:
             result = self._run(self._args() + ["--assume-yes"])
         assert result.exit_code == 0
         assert "✅ App CR and Chart CR deleted." in result.output
+
+
+class TestPullSecretFlag:
+    def _run(self, args=None, input_text=None):
+        runner = CliRunner()
+        return runner.invoke(cli, ["migrate"] + (args or []), input=input_text)
+
+    def _args(self):
+        return ["--name", "my-app", "--namespace", "giantswarm"]
+
+    _DOCKER_SECRET = {"type": "kubernetes.io/dockerconfigjson", "data": {".dockerconfigjson": "e30="}}
+
+    def test_name_forwarded_to_fetcher(self):
+        with patch("fetcher.fetch", return_value=_fetch_result(pull_secret=self._DOCKER_SECRET)) as mock_fetch:
+            self._run(self._args() + ["--pull-secret", "regcred", "--dry-run"])
+        mock_fetch.assert_called_once_with("my-app", "giantswarm", None, "regcred")
+
+    def test_secret_ref_appears_in_generated_source(self):
+        with patch("fetcher.fetch", return_value=_fetch_result(pull_secret=self._DOCKER_SECRET)):
+            result = self._run(self._args() + ["--pull-secret", "regcred", "--dry-run"])
+        assert "secretRef" in result.output
+
+    def test_missing_secret_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=_fetch_result(pull_secret=None)):
+            result = self._run(self._args() + ["--pull-secret", "regcred", "--dry-run"])
+        assert result.exit_code == 1
+
+    def test_missing_secret_message_shown(self):
+        with patch("fetcher.fetch", return_value=_fetch_result(pull_secret=None)):
+            result = self._run(self._args() + ["--pull-secret", "regcred", "--dry-run"])
+        assert "regcred" in result.output and "not found" in result.output
+
+    def test_wrong_shape_warns_but_continues(self):
+        wrong = {"type": "Opaque", "data": {"username": "dXNlcg=="}}
+        with patch("fetcher.fetch", return_value=_fetch_result(pull_secret=wrong)):
+            result = self._run(self._args() + ["--pull-secret", "regcred", "--dry-run"])
+        assert result.exit_code == 0
+        assert "Dry run complete" in result.output
+
+    def test_no_flag_leaves_source_unauthenticated(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--dry-run"])
+        assert "secretRef" not in result.output
