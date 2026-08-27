@@ -104,6 +104,10 @@ _Avoid_: chart resource, helm chart CR
 **Suspension**:
 Pausing app-operator and chart-operator reconciliation on an App CR / Chart CR by setting the respective `paused` annotations, so Flux can take ownership without conflict.
 
+**Resume**:
+The inverse of Suspension: un-pausing app-operator and chart-operator reconciliation on an App CR / Chart CR by clearing the respective `paused` annotations. Idempotent — clearing an annotation that's already absent is a no-op.
+_Avoid_: unpause (implementation detail — the annotation-clearing mechanics, not the domain concept), un-suspend
+
 ## Relationships
 
 - One **App CR** + one **Catalog CR** produce one **HelmRelease** plus either one **OCIRepository** (`type: oci`) or one **HelmRepository** (`type: helm`)

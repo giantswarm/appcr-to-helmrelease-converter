@@ -15,6 +15,7 @@ import resolver
 from converter import convert
 from fetcher import FetchError
 from migrator.cleanup import delete_app_and_chart, flux_cleanup_message, verify_migration
+from migrator.resume import resume_app_and_chart
 from preflight import PreflightError, run_preflight
 
 
@@ -83,6 +84,47 @@ def _resolve_chart_api(api, app: dict):
     return api
 
 
+def _load_client_or_exit(context: str | None):
+    try:
+        return migrator.load_client(context)
+    except migrator.MigratorError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+
+
+def _resolve_chart_api_or_exit(api, app: dict):
+    try:
+        return _resolve_chart_api(api, app)
+    except migrator.MigratorError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+
+
+def _report_step_result(step) -> None:
+    if step.skipped:
+        click.echo(f"ℹ️  {step.skip_message}")
+    elif step.revert_note is not None:
+        click.echo(f"ℹ️  {step.description} — already set, nothing to do.")
+    else:
+        click.echo(f"✅ {step.description}")
+
+
+def _get_app_or_exit(api, namespace: str, name: str, not_found_message: str) -> dict:
+    try:
+        return api.get_namespaced_custom_object(
+            group=migrator._GROUP, version=migrator._VERSION,
+            namespace=namespace, plural=migrator._PLURAL, name=name,
+        )
+    except ApiException as e:
+        if e.status == 404:
+            click.echo(f"ℹ️  {not_found_message}")
+            raise SystemExit(0)
+        click.echo(
+            f"❌ failed to fetch App {namespace}/{name}: {migrator._api_message(e)}", err=True
+        )
+        raise SystemExit(1)
+
+
 def _delete_and_report(api, chart_api, app: dict) -> None:
     try:
         notes = delete_app_and_chart(api, chart_api, app)
@@ -91,7 +133,24 @@ def _delete_and_report(api, chart_api, app: dict) -> None:
         raise SystemExit(1)
     for note in notes:
         click.echo(f"ℹ️  {note}")
-    click.echo("✅ App CR and Chart CR deleted.")
+    if notes:
+        click.echo("✅ App CR deleted.")
+    else:
+        click.echo("✅ App CR and Chart CR deleted.")
+
+
+def _resume_and_report(api, chart_api, app: dict) -> None:
+    try:
+        notes = resume_app_and_chart(api, chart_api, app)
+    except migrator.MigratorError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+    for note in notes:
+        click.echo(f"ℹ️  {note}")
+    if notes:
+        click.echo("✅ App CR unpaused.")
+    else:
+        click.echo("✅ App CR and Chart CR unpaused.")
 
 
 def _parse_values_keys(entries) -> dict[tuple[str, str], str]:
@@ -191,19 +250,11 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
         raise SystemExit(0)
 
     _section(f"Suspend {namespace}/{name}")
-    try:
-        api = migrator.load_client(context)
-    except migrator.MigratorError as e:
-        click.echo(f"❌ {e}", err=True)
-        raise SystemExit(1)
+    api = _load_client_or_exit(context)
 
     runner = migrator.MigrationRunner()
     console = Console(file=sys.stdout, highlight=False)
-    try:
-        chart_api = _resolve_chart_api(api, app)
-    except migrator.MigratorError as e:
-        click.echo(f"❌ {e}", err=True)
-        raise SystemExit(1)
+    chart_api = _resolve_chart_api_or_exit(api, app)
     steps = [
         migrator.DisableFluxReconcileApp(api, app),
         migrator.SuspendApp(api, app),
@@ -229,10 +280,7 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
             for note in runner.revert_notes:
                 click.echo(note, err=True)
             raise SystemExit(1)
-        if step.skipped:
-            click.echo(f"ℹ️ {step.skip_message}")
-        else:
-            click.echo(f"✅ {step.description}")
+        _report_step_result(step)
 
     _section("Clean-up")
     if migrator.is_flux_managed(app):
@@ -256,25 +304,11 @@ cli.add_command(migrate_cmd, name="migrate")
 )
 def cleanup_cmd(name, namespace, context, dry_run, assume_yes):
     _section("Fetch")
-    try:
-        api = migrator.load_client(context)
-    except migrator.MigratorError as e:
-        click.echo(f"❌ {e}", err=True)
-        raise SystemExit(1)
+    api = _load_client_or_exit(context)
 
-    try:
-        app = api.get_namespaced_custom_object(
-            group=migrator._GROUP, version=migrator._VERSION,
-            namespace=namespace, plural=migrator._PLURAL, name=name,
-        )
-    except ApiException as e:
-        if e.status == 404:
-            click.echo(f"ℹ️  App {namespace}/{name} not found — nothing to clean up.")
-            raise SystemExit(0)
-        click.echo(
-            f"❌ failed to fetch App {namespace}/{name}: {migrator._api_message(e)}", err=True
-        )
-        raise SystemExit(1)
+    app = _get_app_or_exit(
+        api, namespace, name, f"App {namespace}/{name} not found — nothing to clean up."
+    )
 
     _section("Verify")
     failures = verify_migration(api, app)
@@ -285,11 +319,7 @@ def cleanup_cmd(name, namespace, context, dry_run, assume_yes):
     click.echo("✅ Migration verified — HelmRelease is ready and adopted.")
 
     _section("Delete")
-    try:
-        chart_api = _resolve_chart_api(api, app)
-    except migrator.MigratorError as e:
-        click.echo(f"❌ {e}", err=True)
-        raise SystemExit(1)
+    chart_api = _resolve_chart_api_or_exit(api, app)
 
     chart_name = migrator.chart_cr_name(app)
     click.echo(
@@ -312,6 +342,61 @@ def cleanup_cmd(name, namespace, context, dry_run, assume_yes):
 
 
 cli.add_command(cleanup_cmd, name="cleanup")
+
+
+@cli.command()
+@click.option("--name", required=True)
+@click.option("--namespace", required=True)
+@click.option("--context", "context", default=None)
+def suspend_cmd(name, namespace, context):
+    _section("Fetch")
+    api = _load_client_or_exit(context)
+
+    app = _get_app_or_exit(
+        api, namespace, name,
+        f"App {namespace}/{name} not found — nothing to suspend "
+        f"(can't look up the Chart CR without it).",
+    )
+
+    _section("Suspend")
+    chart_api = _resolve_chart_api_or_exit(api, app)
+
+    for step in (
+        migrator.SuspendApp(api, app),
+        migrator.SuspendChart(chart_api, app, tolerate_missing=True),
+    ):
+        try:
+            step.apply()
+        except migrator.MigratorError as e:
+            click.echo(f"❌ {e}", err=True)
+            raise SystemExit(1)
+        _report_step_result(step)
+
+
+cli.add_command(suspend_cmd, name="suspend")
+
+
+@cli.command()
+@click.option("--name", required=True)
+@click.option("--namespace", required=True)
+@click.option("--context", "context", default=None)
+def resume_cmd(name, namespace, context):
+    _section("Fetch")
+    api = _load_client_or_exit(context)
+
+    app = _get_app_or_exit(
+        api, namespace, name,
+        f"App {namespace}/{name} not found — nothing to resume "
+        f"(can't look up the Chart CR without it).",
+    )
+
+    _section("Resume")
+    chart_api = _resolve_chart_api_or_exit(api, app)
+
+    _resume_and_report(api, chart_api, app)
+
+
+cli.add_command(resume_cmd, name="resume")
 
 
 if __name__ == "__main__":

@@ -15,16 +15,26 @@ from . import (
 
 
 class SuspendChart(MigrationStep):
-    def __init__(self, api: client.CustomObjectsApi, app: dict):
+    def __init__(self, api: client.CustomObjectsApi, app: dict, tolerate_missing: bool = False):
         self._api = api
         self._app = app
         self._did_pause = False
         self._revert_note: str | None = None
         self._chart_name = chart_cr_name(app)
+        self._tolerate_missing = tolerate_missing
+        self._chart_not_found = False
 
     @property
     def description(self) -> str:
         return f'Annotate Chart CR {_CHART_NAMESPACE}/{self._chart_name} with {_CHART_PAUSED_ANNOTATION}: "true"'
+
+    @property
+    def skipped(self) -> bool:
+        return self._chart_not_found
+
+    @property
+    def skip_message(self) -> str:
+        return f"Chart CR {_CHART_NAMESPACE}/{self._chart_name} not found — skipped"
 
     def apply(self) -> None:
         try:
@@ -33,6 +43,9 @@ class SuspendChart(MigrationStep):
                 name=self._chart_name,
             )
         except ApiException as e:
+            if e.status == 404 and self._tolerate_missing:
+                self._chart_not_found = True
+                return
             raise MigratorError(
                 f"failed to fetch Chart {_CHART_NAMESPACE}/{self._chart_name}: {_api_message(e)}"
             ) from e
