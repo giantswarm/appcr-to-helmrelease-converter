@@ -5,8 +5,15 @@ from converter.values_from import calculate_values_from
 _CLUSTER_LABEL = "giantswarm.io/cluster"
 
 
-def _release_name(app: dict) -> str:
+def _is_remote(app: dict) -> bool:
+    kube_config = (app.get("spec") or {}).get("kubeConfig") or {}
+    return bool(kube_config) and not kube_config.get("inCluster")
+
+
+def release_name(app: dict) -> str:
     name = app["metadata"]["name"]
+    if not _is_remote(app):
+        return name
     cluster_id = (app["metadata"].get("labels") or {}).get(_CLUSTER_LABEL, "")
     if cluster_id:
         name = name.removeprefix(f"{cluster_id}-")
@@ -135,7 +142,7 @@ def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
             ]))
         ])),
         ("interval", "5m"),
-        ("releaseName", _release_name(app)),
+        ("releaseName", release_name(app)),
         ("storageNamespace", app["spec"]["namespace"]),
         ("targetNamespace", app["spec"]["namespace"]),
         ("timeout", "10m"),
@@ -155,9 +162,8 @@ def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
         ("spec", OrderedDict(spec_items)),
     ])
 
-    kube_config = app["spec"].get("kubeConfig", {})
-    is_remote = kube_config and not kube_config.get("inCluster")
-    if is_remote:
+    if _is_remote(app):
+        kube_config = app["spec"]["kubeConfig"]
         hr["spec"]["kubeConfig"] = OrderedDict([
             ("secretRef", OrderedDict([
                 ("name", kube_config["secret"]["name"]),

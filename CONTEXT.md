@@ -93,12 +93,12 @@ _Avoid_: migration (ambiguous — always qualify as "live migration")
 **Chart CR**:
 A Giant Swarm custom resource (`kind: Chart`) created by app-operator for each App CR. Watched by chart-operator, which drives the actual Helm install/upgrade. Always lives in the `giantswarm` namespace on the cluster where chart-operator runs: the MC for in-cluster apps, the WC for remote-cluster apps.
 
-Name is derived from the App CR name by stripping the `cluster_id` prefix and suffix (both applied in sequence) using the `giantswarm.io/cluster` label on the App CR:
+Name is derived from the App CR name by stripping the `cluster_id` prefix and suffix (both applied in sequence) using the `giantswarm.io/cluster` label on the App CR — but only for a remote-cluster app in a dedicated per-app namespace:
 ```
 chart_name = app_name.removeprefix(f"{cluster_id}-")
 chart_name = chart_name.removesuffix(f"-{cluster_id}")
 ```
-For in-cluster apps the label is absent and no stripping is applied — Chart CR name equals App CR name.
+The `giantswarm.io/cluster` label alone is not a reliable predicate for stripping: it also marks in-cluster, per-workload-cluster component apps that share one namespace on the MC (e.g. `operations-auth-bundle` alongside `operations-app-operator` in one org namespace), and those do **not** strip the prefix — their Chart CR name equals the App CR name unstripped. The real predicate is whether the app is remote (`spec.kubeConfig.inCluster` false), not label presence. See ADR 0028.
 _Avoid_: chart resource, helm chart CR
 
 **Suspension**:

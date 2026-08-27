@@ -5,6 +5,8 @@ from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 from kubernetes.config.config_exception import ConfigException
 
+from converter.resources import release_name as chart_cr_name
+
 
 _GROUP = "application.giantswarm.io"
 _VERSION = "v1alpha1"
@@ -17,7 +19,6 @@ _HR_PLURAL = "helmreleases"
 _CHART_NAMESPACE = "giantswarm"
 _APP_PAUSED_ANNOTATION = "app-operator.giantswarm.io/paused"
 _CHART_PAUSED_ANNOTATION = "chart-operator.giantswarm.io/paused"
-_CLUSTER_LABEL = "giantswarm.io/cluster"
 _POLL_INTERVAL_S = 5
 _POLL_TIMEOUT_S = 300
 
@@ -78,16 +79,6 @@ def _api_message(e: ApiException) -> str:
         return json.loads(e.body)["message"]
     except (TypeError, ValueError, KeyError):
         return e.reason or str(e.status)
-
-
-def chart_cr_name(app_dict: dict) -> str:
-    meta = app_dict.get("metadata", {})
-    name = meta.get("name", "")
-    cluster_id = (meta.get("labels") or {}).get(_CLUSTER_LABEL, "")
-    if cluster_id:
-        name = name.removeprefix(f"{cluster_id}-")
-        name = name.removesuffix(f"-{cluster_id}")
-    return name
 
 
 def is_flux_managed(obj: dict) -> bool:

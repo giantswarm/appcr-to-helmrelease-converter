@@ -382,16 +382,29 @@ class TestChartCRName:
         assert chart_cr_name(app) == "my-app"
 
     def test_remote_cluster_strips_prefix(self):
-        app = {"metadata": {"name": "my-cluster-myapp", "labels": {"giantswarm.io/cluster": "my-cluster"}}}
+        app = {
+            "metadata": {"name": "my-cluster-myapp", "labels": {"giantswarm.io/cluster": "my-cluster"}},
+            "spec": {"kubeConfig": {"inCluster": False, "secret": {"name": "kubeconfig"}}},
+        }
         assert chart_cr_name(app) == "myapp"
 
     def test_remote_cluster_strips_suffix(self):
-        app = {"metadata": {"name": "myapp-my-cluster", "labels": {"giantswarm.io/cluster": "my-cluster"}}}
+        app = {
+            "metadata": {"name": "myapp-my-cluster", "labels": {"giantswarm.io/cluster": "my-cluster"}},
+            "spec": {"kubeConfig": {"inCluster": False, "secret": {"name": "kubeconfig"}}},
+        }
         assert chart_cr_name(app) == "myapp"
 
     def test_remote_cluster_strips_both_prefix_and_suffix(self):
-        app = {"metadata": {"name": "my-cluster-myapp-my-cluster", "labels": {"giantswarm.io/cluster": "my-cluster"}}}
+        app = {
+            "metadata": {"name": "my-cluster-myapp-my-cluster", "labels": {"giantswarm.io/cluster": "my-cluster"}},
+            "spec": {"kubeConfig": {"inCluster": False, "secret": {"name": "kubeconfig"}}},
+        }
         assert chart_cr_name(app) == "myapp"
+
+    def test_in_cluster_shared_namespace_app_keeps_cluster_prefix(self):
+        app = {"metadata": {"name": "operations-auth-bundle", "labels": {"giantswarm.io/cluster": "operations"}}}
+        assert chart_cr_name(app) == "operations-auth-bundle"
 
     def test_no_labels_field_leaves_name_unchanged(self):
         app = {"metadata": {"name": "my-app"}}

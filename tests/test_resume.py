@@ -18,6 +18,7 @@ _APP_REMOTE = {
         "namespace": "giantswarm",
         "labels": {"giantswarm.io/cluster": "my-cluster"},
     },
+    "spec": {"kubeConfig": {"inCluster": False}},
 }
 
 
