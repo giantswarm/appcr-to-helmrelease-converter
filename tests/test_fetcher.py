@@ -409,3 +409,45 @@ class TestFetchAppCrCoordinates:
             "plural": "apps",
             "name": "my-app",
         }
+
+
+class TestFetchPullSecret:
+    _NS = "giantswarm"
+    _PULL_SECRET = {"type": "kubernetes.io/dockerconfigjson", "data": {".dockerconfigjson": "e30="}}
+
+    def _fetch(self, pull_secret, resources=None):
+        core_api = _mock_core_api(resources if resources is not None else
+                                  {("Secret", "regcred", self._NS): self._PULL_SECRET})
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=_mock_api()), \
+             patch("kubernetes.client.CoreV1Api", return_value=core_api):
+            return fetch("my-app", self._NS, None, pull_secret), core_api
+
+    def test_pull_secret_is_none_when_flag_absent(self):
+        result, _ = self._fetch(None)
+        assert result.pull_secret is None
+
+    def test_no_secret_read_when_flag_absent(self):
+        _, core_api = self._fetch(None)
+        assert core_api.read_namespaced_secret.call_count == 0
+
+    def test_pull_secret_fetched_from_app_namespace(self):
+        result, _ = self._fetch("regcred")
+        assert result.pull_secret == self._PULL_SECRET
+
+    def test_pull_secret_read_with_app_namespace(self):
+        _, core_api = self._fetch("regcred")
+        core_api.read_namespaced_secret.assert_called_once_with(name="regcred", namespace=self._NS)
+
+    def test_missing_pull_secret_is_none_not_error(self):
+        result, _ = self._fetch("regcred", resources={})
+        assert result.pull_secret is None
+
+    def test_non_404_pull_secret_error_raises_fetch_error(self):
+        core_api = MagicMock()
+        core_api.read_namespaced_secret.side_effect = ApiException(status=403)
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=_mock_api()), \
+             patch("kubernetes.client.CoreV1Api", return_value=core_api), \
+             pytest.raises(FetchError):
+            fetch("my-app", self._NS, None, "regcred")

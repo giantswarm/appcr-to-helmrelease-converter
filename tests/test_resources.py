@@ -580,3 +580,40 @@ class TestBuildHelmReleaseAndHelmRepo:
         ]}}
         result = build_helm_release_and_helm_repo(_app(), cat)
         assert result[0]["spec"]["url"] == "https://charts.example.io"
+
+
+class TestPullSecret:
+    def test_oci_repository_omits_secret_ref_without_pull_secret(self):
+        assert "secretRef" not in build_oci_repository(_app(), _catalog())["spec"]
+
+    def test_oci_repository_emits_secret_ref(self):
+        spec = build_oci_repository(_app(), _catalog(), "regcred")["spec"]
+        assert spec["secretRef"] == {"name": "regcred"}
+
+    def test_oci_repository_secret_ref_sits_between_ref_and_url(self):
+        spec = build_oci_repository(_app(), _catalog(), "regcred")["spec"]
+        assert list(spec) == ["interval", "provider", "ref", "secretRef", "url"]
+
+    def test_oci_repository_keeps_url_with_pull_secret(self):
+        cat = _catalog(url="oci://example.io/charts")
+        spec = build_oci_repository(_app(spec_name="kong-app"), cat, "regcred")["spec"]
+        assert spec["url"] == "oci://example.io/charts/kong-app"
+
+    def test_empty_pull_secret_name_omits_secret_ref(self):
+        assert "secretRef" not in build_oci_repository(_app(), _catalog(), "")["spec"]
+
+    def test_helm_repository_omits_secret_ref_without_pull_secret(self):
+        repo = build_helm_release_and_helm_repo(_app(), _helm_catalog())[0]
+        assert "secretRef" not in repo["spec"]
+
+    def test_helm_repository_emits_secret_ref(self):
+        repo = build_helm_release_and_helm_repo(_app(), _helm_catalog(), None, "regcred")[0]
+        assert repo["spec"]["secretRef"] == {"name": "regcred"}
+
+    def test_helm_repository_secret_ref_sits_between_interval_and_url(self):
+        repo = build_helm_release_and_helm_repo(_app(), _helm_catalog(), None, "regcred")[0]
+        assert list(repo["spec"]) == ["interval", "secretRef", "url"]
+
+    def test_helm_release_gets_no_secret_ref(self):
+        hr = build_helm_release_and_helm_repo(_app(), _helm_catalog(), None, "regcred")[1]
+        assert "secretRef" not in hr["spec"]

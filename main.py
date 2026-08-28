@@ -185,11 +185,17 @@ def _parse_values_keys(entries) -> dict[tuple[str, str], str]:
     help="Pre-answer the valuesKey prompt for a multi-key ConfigMap/Secret, "
          "e.g. --values-key ConfigMap/my-cm=values.yaml. Repeatable.",
 )
-def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, values_key):
+@click.option(
+    "--pull-secret", "pull_secret", default=None, metavar="NAME",
+    help="Name of an existing Secret holding catalog credentials. Emitted as spec.secretRef "
+         "on the generated OCIRepository or HelmRepository. Must be in the App CR's namespace "
+         "— Flux does not resolve it across namespaces.",
+)
+def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, values_key, pull_secret):
     _section("Fetch")
     click.echo(f'Fetching "{name}" from namespace "{namespace}"...')
     try:
-        result = fetcher.fetch(name, namespace, context)
+        result = fetcher.fetch(name, namespace, context, pull_secret)
     except FetchError as e:
         click.echo("", err=True)
         click.echo(f"❌ {e}", err=True)
@@ -198,7 +204,10 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
     _dump_highlighted(_to_yaml_str([_strip_server_fields(app)]))
 
     _section("Preflight checks")
-    issues = run_preflight(app, catalog, result.referenced_configs, result.dependency_helm_releases)
+    issues = run_preflight(
+        app, catalog, result.referenced_configs, result.dependency_helm_releases,
+        pull_secret_name=pull_secret, pull_secret=result.pull_secret,
+    )
     warnings = [i for i in issues if not isinstance(i, PreflightError)]
     errors = [i for i in issues if isinstance(i, PreflightError)]
     for issue in warnings + errors:
@@ -230,7 +239,7 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
         raise SystemExit(1)
 
     _section("Generated Flux resources")
-    docs = convert(app, catalog, resolution)
+    docs = convert(app, catalog, resolution, pull_secret)
     yaml_str = _to_yaml_str(docs)
     _dump_highlighted(yaml_str)
 

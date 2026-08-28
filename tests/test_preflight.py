@@ -10,6 +10,7 @@ from preflight import (
     check_namespace_config,
     check_oci_fallback,
     check_psp_removal_patch,
+    check_pull_secret,
     run_preflight,
 )
 
@@ -448,3 +449,77 @@ class TestCheckDependencyHelmReleases:
         app = {"metadata": {"name": "my-app", "namespace": "giantswarm"}, "spec": {}}
         issues = run_preflight(app, _EMPTY_CATALOG, dependency_helm_releases={"coredns": None})
         assert any(isinstance(i, PreflightError) and "coredns" in str(i) for i in issues)
+
+
+_DOCKER_SECRET = {"type": "kubernetes.io/dockerconfigjson", "data": {".dockerconfigjson": "e30="}}
+_BASIC_AUTH_SECRET = {"type": "Opaque", "data": {"username": "dXNlcg==", "password": "cGFzcw=="}}
+_APP_IN_NS = {"metadata": {"name": "my-app", "namespace": "giantswarm"}, "spec": {}}
+
+
+class TestCheckPullSecret:
+    def test_no_flag_returns_no_issues(self):
+        assert check_pull_secret(_APP_IN_NS, _CATALOG_OCI, None, None) == []
+
+    def test_no_flag_ignores_a_fetched_secret(self):
+        assert check_pull_secret(_APP_IN_NS, _CATALOG_OCI, None, _DOCKER_SECRET) == []
+
+    def test_missing_secret_is_an_error(self):
+        issues = check_pull_secret(_APP_IN_NS, _CATALOG_OCI, "regcred", None)
+        assert isinstance(issues[0], PreflightError)
+
+    def test_missing_secret_message_names_secret_and_namespace(self):
+        issues = check_pull_secret(_APP_IN_NS, _CATALOG_OCI, "regcred", None)
+        assert "regcred" in str(issues[0]) and "giantswarm" in str(issues[0])
+
+    def test_dockerconfigjson_secret_passes_oci_path(self):
+        assert check_pull_secret(_APP_IN_NS, _CATALOG_OCI, "regcred", _DOCKER_SECRET) == []
+
+    def test_dockercfg_secret_passes_oci_path(self):
+        secret = {"type": "kubernetes.io/dockercfg", "data": {".dockercfg": "e30="}}
+        assert check_pull_secret(_APP_IN_NS, _CATALOG_OCI, "regcred", secret) == []
+
+    def test_basic_auth_secret_warns_on_oci_path(self):
+        issues = check_pull_secret(_APP_IN_NS, _CATALOG_OCI, "regcred", _BASIC_AUTH_SECRET)
+        assert isinstance(issues[0], PreflightWarning)
+
+    def test_oci_shape_warning_names_expected_type(self):
+        issues = check_pull_secret(_APP_IN_NS, _CATALOG_OCI, "regcred", _BASIC_AUTH_SECRET)
+        assert "kubernetes.io/dockerconfigjson" in str(issues[0])
+
+    def test_basic_auth_secret_passes_helm_path(self):
+        assert check_pull_secret(_APP_IN_NS, _CATALOG_SINGLE_HELM, "regcred", _BASIC_AUTH_SECRET) == []
+
+    def test_dockerconfigjson_secret_warns_on_helm_path(self):
+        issues = check_pull_secret(_APP_IN_NS, _CATALOG_SINGLE_HELM, "regcred", _DOCKER_SECRET)
+        assert isinstance(issues[0], PreflightWarning)
+
+    def test_helm_shape_warning_names_missing_keys(self):
+        issues = check_pull_secret(_APP_IN_NS, _CATALOG_SINGLE_HELM, "regcred", _DOCKER_SECRET)
+        assert "username" in str(issues[0]) and "password" in str(issues[0])
+
+    def test_helm_path_warns_when_only_password_missing(self):
+        secret = {"type": "Opaque", "data": {"username": "dXNlcg=="}}
+        issues = check_pull_secret(_APP_IN_NS, _CATALOG_SINGLE_HELM, "regcred", secret)
+        assert "password" in str(issues[0]) and "username" not in str(issues[0]).split(";")[0]
+
+    def test_helm_path_warns_on_secret_with_no_data(self):
+        issues = check_pull_secret(_APP_IN_NS, _CATALOG_SINGLE_HELM, "regcred", {"type": "Opaque"})
+        assert isinstance(issues[0], PreflightWarning)
+
+    def test_missing_secret_surfaced_by_run_preflight(self):
+        issues = run_preflight(_APP_IN_NS, _CATALOG_OCI, pull_secret_name="regcred", pull_secret=None)
+        assert any(isinstance(i, PreflightError) and "regcred" in str(i) for i in issues)
+
+    def test_shape_warning_surfaced_by_run_preflight(self):
+        issues = run_preflight(
+            _APP_IN_NS, _CATALOG_OCI, pull_secret_name="regcred", pull_secret=_BASIC_AUTH_SECRET
+        )
+        assert any(isinstance(i, PreflightWarning) and "regcred" in str(i) for i in issues)
+
+    def test_dockerconfigjson_secret_passes_storage_style_oci_catalog(self):
+        assert check_pull_secret(_APP_IN_NS, _CATALOG_STORAGE_OCI, "regcred", _DOCKER_SECRET) == []
+
+    def test_basic_auth_secret_warns_on_storage_style_oci_catalog(self):
+        issues = check_pull_secret(_APP_IN_NS, _CATALOG_STORAGE_OCI, "regcred", _BASIC_AUTH_SECRET)
+        assert isinstance(issues[0], PreflightWarning)
+        assert "kubernetes.io/dockerconfigjson" in str(issues[0])

@@ -167,3 +167,24 @@ class TestConvertPathB:
             ]}
         }
         assert convert(MINIMAL_APP, both)[0]["kind"] == "OCIRepository"
+
+
+class TestConvertPullSecret:
+    _OCI_CATALOG = {"spec": {"repositories": [{"type": "oci", "URL": "oci://example.io/charts"}]}}
+    _HELM_CATALOG = {"spec": {"repositories": [{"type": "helm", "URL": "https://charts.example.io"}]}}
+    _APP = {
+        "metadata": {"name": "my-app", "namespace": "giantswarm"},
+        "spec": {"name": "my-app", "namespace": "monitoring", "version": "1.2.3"},
+    }
+
+    def test_oci_path_passes_pull_secret_to_source(self):
+        docs = convert(self._APP, self._OCI_CATALOG, None, "regcred")
+        assert docs[0]["spec"]["secretRef"] == {"name": "regcred"}
+
+    def test_helm_path_passes_pull_secret_to_source(self):
+        docs = convert(self._APP, self._HELM_CATALOG, None, "regcred")
+        assert docs[0]["spec"]["secretRef"] == {"name": "regcred"}
+
+    def test_no_pull_secret_leaves_source_unauthenticated(self):
+        docs = convert(self._APP, self._OCI_CATALOG)
+        assert "secretRef" not in docs[0]["spec"]

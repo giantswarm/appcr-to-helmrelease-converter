@@ -41,45 +41,55 @@ def _helm_url_from_catalog(catalog: dict) -> str:
     raise ValueError("catalog contains no helm repository")
 
 
-def build_helm_release_and_oci_repo(app: dict, catalog: dict, resolution=None) -> list:
-    return [build_oci_repository(app, catalog), build_helm_release(app, resolution)]
+def build_helm_release_and_oci_repo(
+    app: dict, catalog: dict, resolution=None, pull_secret: str | None = None
+) -> list:
+    return [build_oci_repository(app, catalog, pull_secret), build_helm_release(app, resolution)]
 
 
-def build_helm_release_and_helm_repo(app: dict, catalog: dict, resolution=None) -> list:
-    return [_build_helm_repository(app, catalog), _build_helm_release_helm(app, resolution)]
+def build_helm_release_and_helm_repo(
+    app: dict, catalog: dict, resolution=None, pull_secret: str | None = None
+) -> list:
+    return [
+        _build_helm_repository(app, catalog, pull_secret),
+        _build_helm_release_helm(app, resolution),
+    ]
 
 
-def build_oci_repository(app: dict, catalog: dict) -> OrderedDict:
+def build_oci_repository(app: dict, catalog: dict, pull_secret: str | None = None) -> OrderedDict:
     version = app["spec"].get("version")
     if not version:
         raise ValueError("spec.version is required but empty")
     url_base = _oci_url_from_catalog(catalog)
     url = f"{url_base.rstrip('/')}/{app['spec']['name']}"
+    spec = OrderedDict([
+        ("interval", "10m"),
+        ("provider", "generic"),
+        ("ref", OrderedDict([
+            ("tag", version),
+        ])),
+    ])
+    if pull_secret:
+        spec["secretRef"] = OrderedDict([("name", pull_secret)])
+    spec["url"] = url
     return OrderedDict([
         ("apiVersion", "source.toolkit.fluxcd.io/v1"),
         ("kind", "OCIRepository"),
         ("metadata", _filtered_metadata(app)),
-        ("spec", OrderedDict([
-            ("interval", "10m"),
-            ("provider", "generic"),
-            ("ref", OrderedDict([
-                ("tag", version),
-            ])),
-            ("url", url),
-        ]))
+        ("spec", spec),
     ])
 
 
-def _build_helm_repository(app: dict, catalog: dict) -> OrderedDict:
-    url = _helm_url_from_catalog(catalog)
+def _build_helm_repository(app: dict, catalog: dict, pull_secret: str | None = None) -> OrderedDict:
+    spec = OrderedDict([("interval", "10m")])
+    if pull_secret:
+        spec["secretRef"] = OrderedDict([("name", pull_secret)])
+    spec["url"] = _helm_url_from_catalog(catalog)
     return OrderedDict([
         ("apiVersion", "source.toolkit.fluxcd.io/v1"),
         ("kind", "HelmRepository"),
         ("metadata", _filtered_metadata(app)),
-        ("spec", OrderedDict([
-            ("interval", "10m"),
-            ("url", url),
-        ])),
+        ("spec", spec),
     ])
 
 
