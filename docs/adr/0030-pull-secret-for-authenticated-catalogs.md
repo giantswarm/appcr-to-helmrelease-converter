@@ -1,4 +1,4 @@
-# 29. `--pull-secret` for authenticated OCI and Helm catalogs
+# 30. `--pull-secret` for authenticated OCI and Helm catalogs
 
 Date: 2026-08-20
 
