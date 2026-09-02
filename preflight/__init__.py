@@ -1,4 +1,5 @@
 from converter import catalog_has_oci
+from converter.resources import _helm_url_from_catalog
 from converter.values_from import is_psp_removal_patch
 
 
@@ -173,6 +174,31 @@ def check_pull_secret(
     return []
 
 
+def check_registry_override(app: dict, catalog: dict, registry_override: str | None) -> list[PreflightIssue]:
+    if not registry_override or "://" not in registry_override:
+        return []
+    scheme = registry_override.split("://", 1)[0]
+    if catalog_has_oci(catalog):
+        if scheme != "oci":
+            return [PreflightError(
+                f'--override-registry-url "{registry_override}" has a scheme; an OCIRepository is always '
+                'oci://. The flag never sets a scheme, and this value contradicts the conversion path'
+            )]
+        return []
+    try:
+        helm_url = _helm_url_from_catalog(catalog)
+    except ValueError:
+        return []
+    helm_scheme = helm_url.split("://", 1)[0] if "://" in helm_url else helm_url
+    if scheme != helm_scheme:
+        return [PreflightError(
+            f'--override-registry-url "{registry_override}" has scheme "{scheme}" but the catalog\'s '
+            f'HelmRepository uses scheme "{helm_scheme}"; the flag never sets a scheme, and a mismatching '
+            "one contradicts the conversion path"
+        )]
+    return []
+
+
 _CHECKS = [
     check_kube_config,
     check_namespace_config,
@@ -197,6 +223,7 @@ def run_preflight(
     dependency_helm_releases: dict | None = None,
     pull_secret_name: str | None = None,
     pull_secret: dict | None = None,
+    registry_override: str | None = None,
 ) -> list[PreflightIssue]:
     refs = referenced_configs or {}
     deps = dependency_helm_releases or {}
@@ -205,4 +232,5 @@ def run_preflight(
         + [issue for check in _REFS_CHECKS for issue in check(app, catalog, refs)]
         + check_dependency_helm_releases(app, catalog, deps)
         + check_pull_secret(app, catalog, pull_secret_name, pull_secret)
+        + check_registry_override(app, catalog, registry_override)
     )

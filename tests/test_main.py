@@ -1077,3 +1077,60 @@ class TestResumeCommand:
             result = self._run(self._args())
         assert result.exit_code != 0
         assert "bad kubeconfig secret" in result.output
+
+
+class TestOverrideRegistryUrlFlag:
+    def _run(self, args=None):
+        runner = CliRunner()
+        return runner.invoke(cli, ["migrate"] + (args or []))
+
+    def _args(self):
+        return ["--name", "my-app", "--namespace", "giantswarm", "--dry-run"]
+
+    def test_host_replaced_in_generated_url(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--override-registry-url", "gsociprivate.azurecr.io"])
+        assert "oci://gsociprivate.azurecr.io/charts/giantswarm/my-app" in result.output
+
+    def test_info_line_printed(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--override-registry-url", "gsociprivate.azurecr.io"])
+        assert "Registry host overridden to gsociprivate.azurecr.io." in result.output
+
+    def test_scheme_stripped_from_info_line(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--override-registry-url", "oci://gsociprivate.azurecr.io"])
+        assert "Registry host overridden to gsociprivate.azurecr.io." in result.output
+
+    def test_trailing_slash_accepted(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--override-registry-url", "gsociprivate.azurecr.io/"])
+        assert result.exit_code == 0
+        assert "oci://gsociprivate.azurecr.io/charts/giantswarm/my-app" in result.output
+
+    def test_port_kept(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--override-registry-url", "registry.local:5000"])
+        assert "oci://registry.local:5000/charts/giantswarm/my-app" in result.output
+
+    def test_path_in_value_rejected(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--override-registry-url", "mirror.local/charts"])
+        assert result.exit_code == 2
+        assert "host" in result.output
+
+    def test_empty_value_rejected(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--override-registry-url", ""])
+        assert result.exit_code == 2
+
+    def test_contradicting_scheme_exits_nonzero(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--override-registry-url", "https://mirror.local"])
+        assert result.exit_code == 1
+
+    def test_no_flag_keeps_catalog_host(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args())
+        assert "oci://gsoci.azurecr.io/charts/giantswarm/my-app" in result.output
+        assert "Registry host overridden" not in result.output
