@@ -11,6 +11,7 @@ from preflight import (
     check_oci_fallback,
     check_psp_removal_patch,
     check_pull_secret,
+    check_registry_override,
     run_preflight,
 )
 
@@ -523,3 +524,59 @@ class TestCheckPullSecret:
         issues = check_pull_secret(_APP_IN_NS, _CATALOG_STORAGE_OCI, "regcred", _BASIC_AUTH_SECRET)
         assert isinstance(issues[0], PreflightWarning)
         assert "kubernetes.io/dockerconfigjson" in str(issues[0])
+
+
+class TestCheckRegistryOverride:
+    def test_no_flag_returns_no_issues(self):
+        assert check_registry_override(_APP_IN_NS, _CATALOG_OCI, None) == []
+
+    def test_empty_string_returns_no_issues(self):
+        assert check_registry_override(_APP_IN_NS, _CATALOG_OCI, "") == []
+
+    def test_bare_host_returns_no_issues(self):
+        assert check_registry_override(_APP_IN_NS, _CATALOG_OCI, "gsociprivate.azurecr.io") == []
+
+    def test_non_oci_scheme_against_oci_catalog_is_an_error(self):
+        issues = check_registry_override(_APP_IN_NS, _CATALOG_OCI, "https://gsociprivate.azurecr.io")
+        assert len(issues) == 1
+        assert isinstance(issues[0], PreflightError)
+
+    def test_non_oci_scheme_error_names_value_and_reason(self):
+        issues = check_registry_override(_APP_IN_NS, _CATALOG_OCI, "https://gsociprivate.azurecr.io")
+        message = str(issues[0])
+        assert "https://gsociprivate.azurecr.io" in message
+        assert "oci://" in message
+
+    def test_matching_oci_scheme_returns_no_issues(self):
+        assert check_registry_override(_APP_IN_NS, _CATALOG_OCI, "oci://gsociprivate.azurecr.io") == []
+
+    def test_uppercase_oci_scheme_returns_no_issues(self):
+        assert check_registry_override(_APP_IN_NS, _CATALOG_OCI, "OCI://gsociprivate.azurecr.io") == []
+
+    def test_mismatched_scheme_against_helm_catalog_is_an_error(self):
+        issues = check_registry_override(_APP_IN_NS, _CATALOG_SINGLE_HELM, "oci://gsociprivate.azurecr.io")
+        assert len(issues) == 1
+        assert isinstance(issues[0], PreflightError)
+
+    def test_mismatched_scheme_error_names_both_schemes(self):
+        issues = check_registry_override(_APP_IN_NS, _CATALOG_SINGLE_HELM, "oci://gsociprivate.azurecr.io")
+        message = str(issues[0])
+        assert "oci" in message and "https" in message
+
+    def test_matching_helm_scheme_returns_no_issues(self):
+        assert check_registry_override(_APP_IN_NS, _CATALOG_SINGLE_HELM, "https://mirror.example.io") == []
+
+    def test_matching_helm_scheme_case_variant_returns_no_issues(self):
+        assert check_registry_override(_APP_IN_NS, _CATALOG_SINGLE_HELM, "HTTPS://mirror.example.io") == []
+
+    def test_helm_only_catalog_with_no_helm_entry_returns_no_issues(self):
+        assert check_registry_override(_APP_IN_NS, _EMPTY_CATALOG, "https://mirror.example.io") == []
+
+    def test_default_is_no_op_via_run_preflight(self):
+        assert run_preflight(APP_WITHOUT_NAMESPACE_CONFIG, _CATALOG_OCI) == []
+
+    def test_mismatch_surfaced_by_run_preflight(self):
+        issues = run_preflight(
+            APP_WITHOUT_NAMESPACE_CONFIG, _CATALOG_OCI, registry_override="https://gsociprivate.azurecr.io"
+        )
+        assert any(isinstance(i, PreflightError) for i in issues)

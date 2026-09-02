@@ -37,6 +37,7 @@ uv run python main.py migrate --name <app-name> --namespace <namespace> --contex
 | `--assume-yes` / `-y` | Auto-confirm the proceed and revert-on-failure prompts. For `migrate`, never auto-confirms the destructive delete of App/Chart CRs — see the `cleanup` command below, where `-y` does skip that prompt. |
 | `--values-key KIND/NAME=KEY` | Pre-answer the `valuesKey` prompt for a multi-key ConfigMap/Secret (e.g. `ConfigMap/my-cm=values.yaml`). Repeatable. |
 | `--pull-secret NAME` | Name of an existing Secret holding catalog credentials. Emitted as `spec.secretRef` on the generated OCIRepository or HelmRepository. Must be in the App CR's namespace — Flux does not resolve it across namespaces. |
+| `--override-registry-url HOST` | Replace the **host** of the registry URL the converter reads from the Catalog CR — for a mirrored registry the Catalog CR doesn't know about. Bare host, `host:port`, or either with a scheme; a path or empty value is a usage error. Only the host changes — the path and chart name are untouched. |
 
 **Example — preview before committing:**
 
@@ -57,6 +58,14 @@ uv run python main.py migrate --name loki --namespace monitoring --pull-secret r
 ```
 
 The Secret must already exist in the App CR's namespace; the tool checks but never creates it. A missing Secret is a hard error. The two source kinds expect different Secret shapes — an OCIRepository wants a `kubernetes.io/dockerconfigjson` Secret (`kubectl create secret docker-registry`), a HelmRepository wants `username` and `password` data keys — and a mismatch is a warning, not an error, so you can proceed when your registry's rules differ from the check.
+
+**Example — mirrored registry:**
+
+```bash
+uv run python main.py migrate --name test --namespace giantswarm --override-registry-url gsociprivate.azurecr.io
+```
+
+If the Catalog CR's OCI entry is `oci://gsoci.azurecr.io/charts/giantswarm` and the App CR is for chart `test`, the converter would normally emit `oci://gsoci.azurecr.io/charts/giantswarm/test`. With the flag above, it emits `oci://gsociprivate.azurecr.io/charts/giantswarm/test` instead — only the host is replaced (`gsoci.azurecr.io` → `gsociprivate.azurecr.io`); the path (`charts/giantswarm`) and the chart name (`test`) are not touched. Use this when an installation pulls from a mirror of the registry named in the Catalog CR. The scheme is not yours to set: an OCIRepository is always `oci://` and a HelmRepository always keeps the catalog's own scheme, so a scheme in the flag value is only accepted when it agrees with that — anything else is a preflight error.
 
 **Example — unattended run** (discover the keys interactively once, then replay):
 

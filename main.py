@@ -12,7 +12,7 @@ from yaml.resolver import BaseResolver
 import fetcher
 import migrator
 import resolver
-from converter import convert
+from converter import convert, override_catalog_registry
 from fetcher import FetchError
 from migrator.cleanup import delete_app_and_chart, flux_cleanup_message, verify_migration
 from migrator.resume import resume_app_and_chart
@@ -153,6 +153,24 @@ def _resume_and_report(api, chart_api, app: dict) -> None:
         click.echo("✅ App CR and Chart CR unpaused.")
 
 
+def _host_only(value: str) -> str:
+    return value.rpartition("://")[2]
+
+
+def _validate_registry_override(ctx, param, value):
+    if value is None:
+        return None
+    value = value.removesuffix("/")
+    host = _host_only(value)
+    if not host or any(c in host for c in "/?#"):
+        raise click.BadParameter(
+            f'"{value}" is not a registry host; pass a host like gsociprivate.azurecr.io '
+            "or registry.local:5000, optionally with a scheme, but without a path, query, or fragment",
+            param_hint="--override-registry-url",
+        )
+    return value
+
+
 def _parse_values_keys(entries) -> dict[tuple[str, str], str]:
     overrides = {}
     for entry in entries:
@@ -191,7 +209,15 @@ def _parse_values_keys(entries) -> dict[tuple[str, str], str]:
          "on the generated OCIRepository or HelmRepository. Must be in the App CR's namespace "
          "— Flux does not resolve it across namespaces.",
 )
-def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, values_key, pull_secret):
+@click.option(
+    "--override-registry-url", "registry_override", default=None, metavar="HOST",
+    callback=_validate_registry_override,
+    help="Replace the registry host of the catalog URL, e.g. gsociprivate.azurecr.io. "
+         "Host and optional port only — the chart path from the Catalog CR is kept. "
+         "Use it when the installation pulls charts from a mirror of the catalog's registry.",
+)
+def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, values_key, pull_secret,
+                registry_override):
     _section("Fetch")
     click.echo(f'Fetching "{name}" from namespace "{namespace}"...')
     try:
@@ -207,6 +233,7 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
     issues = run_preflight(
         app, catalog, result.referenced_configs, result.dependency_helm_releases,
         pull_secret_name=pull_secret, pull_secret=result.pull_secret,
+        registry_override=registry_override,
     )
     warnings = [i for i in issues if not isinstance(i, PreflightError)]
     errors = [i for i in issues if isinstance(i, PreflightError)]
@@ -239,6 +266,9 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
         raise SystemExit(1)
 
     _section("Generated Flux resources")
+    if registry_override:
+        catalog = override_catalog_registry(catalog, registry_override)
+        click.echo(f"ℹ️  Registry host overridden to {_host_only(registry_override)}.")
     docs = convert(app, catalog, resolution, pull_secret)
     yaml_str = _to_yaml_str(docs)
     _dump_highlighted(yaml_str)

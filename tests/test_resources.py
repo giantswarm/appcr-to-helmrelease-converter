@@ -1,6 +1,11 @@
 from collections import OrderedDict
 
-from converter.resources import build_oci_repository, build_helm_release, build_helm_release_and_helm_repo
+from converter.resources import (
+    build_oci_repository,
+    build_helm_release,
+    build_helm_release_and_helm_repo,
+    override_catalog_registry,
+)
 
 
 def _app(*, name="my-app", namespace="giantswarm", spec_name="my-app", spec_namespace="monitoring",
@@ -617,3 +622,62 @@ class TestPullSecret:
     def test_helm_release_gets_no_secret_ref(self):
         hr = build_helm_release_and_helm_repo(_app(), _helm_catalog(), None, "regcred")[1]
         assert "secretRef" not in hr["spec"]
+
+
+# ---------------------------------------------------------------------------
+# override_catalog_registry
+# ---------------------------------------------------------------------------
+
+class TestOverrideCatalogRegistry:
+    def test_oci_path_replaces_host(self):
+        cat = _catalog(url="oci://gsoci.azurecr.io/charts/giantswarm")
+        result = override_catalog_registry(cat, "gsociprivate.azurecr.io")
+        assert result["spec"]["repositories"][0]["URL"] == "oci://gsociprivate.azurecr.io/charts/giantswarm"
+
+    def test_helm_path_replaces_host_and_keeps_scheme(self):
+        cat = _helm_catalog(url="https://charts.example.io/stable")
+        result = override_catalog_registry(cat, "mirror.local")
+        assert result["spec"]["repositories"][0]["URL"] == "https://mirror.local/stable"
+
+    def test_oci_storage_fallback_used_when_no_repositories(self):
+        cat = {"spec": {"storage": {"type": "oci", "URL": "oci://gsoci.azurecr.io/charts/giantswarm"}}}
+        result = override_catalog_registry(cat, "gsociprivate.azurecr.io")
+        assert result["spec"]["storage"]["URL"] == "oci://gsociprivate.azurecr.io/charts/giantswarm"
+
+    def test_helm_storage_fallback_used_when_no_repositories(self):
+        cat = {"spec": {"storage": {"type": "helm", "URL": "https://charts.example.io/stable"}}}
+        result = override_catalog_registry(cat, "mirror.local")
+        assert result["spec"]["storage"]["URL"] == "https://mirror.local/stable"
+
+    def test_host_with_port_is_kept(self):
+        cat = _helm_catalog(url="https://charts.example.io/stable")
+        result = override_catalog_registry(cat, "registry.local:5000")
+        assert result["spec"]["repositories"][0]["URL"] == "https://registry.local:5000/stable"
+
+    def test_host_given_with_scheme_is_stripped(self):
+        cat = _catalog(url="oci://gsoci.azurecr.io/charts/giantswarm")
+        result = override_catalog_registry(cat, "oci://gsociprivate.azurecr.io")
+        assert result["spec"]["repositories"][0]["URL"] == "oci://gsociprivate.azurecr.io/charts/giantswarm"
+
+    def test_oci_entry_with_non_oci_scheme_is_forced_to_oci(self):
+        cat = _catalog(url="https://gsoci.azurecr.io/charts/giantswarm")
+        result = override_catalog_registry(cat, "gsociprivate.azurecr.io")
+        assert result["spec"]["repositories"][0]["URL"] == "oci://gsociprivate.azurecr.io/charts/giantswarm"
+
+    def test_sibling_helm_entry_untouched_when_oci_overridden(self):
+        cat = {"spec": {"repositories": [
+            {"type": "helm", "URL": "https://charts.example.io/stable"},
+            {"type": "oci", "URL": "oci://gsoci.azurecr.io/charts/giantswarm"},
+        ]}}
+        result = override_catalog_registry(cat, "gsociprivate.azurecr.io")
+        assert result["spec"]["repositories"][0]["URL"] == "https://charts.example.io/stable"
+
+    def test_input_dict_not_mutated(self):
+        cat = _catalog(url="oci://gsoci.azurecr.io/charts/giantswarm")
+        override_catalog_registry(cat, "gsociprivate.azurecr.io")
+        assert cat["spec"]["repositories"][0]["URL"] == "oci://gsoci.azurecr.io/charts/giantswarm"
+
+    def test_no_matching_entry_anywhere_leaves_catalog_unchanged(self):
+        cat = {"spec": {"repositories": [{"type": "s3", "URL": "s3://ignored"}]}}
+        result = override_catalog_registry(cat, "mirror.local")
+        assert result == cat

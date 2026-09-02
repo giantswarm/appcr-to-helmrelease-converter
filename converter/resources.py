@@ -1,4 +1,6 @@
 from collections import OrderedDict
+from copy import deepcopy
+from urllib.parse import urlparse
 
 from converter.values_from import calculate_values_from
 
@@ -21,6 +23,34 @@ def release_name(app: dict) -> str:
     return name
 
 
+def catalog_has_oci(catalog: dict) -> bool:
+    for repo in (catalog.get("spec") or {}).get("repositories") or []:
+        if repo.get("type") == "oci":
+            return True
+    storage = (catalog.get("spec") or {}).get("storage") or {}
+    return storage.get("type") == "oci"
+
+
+def override_catalog_registry(catalog: dict, host: str) -> dict:
+    if "://" in host:
+        host = urlparse(host).netloc
+    catalog = deepcopy(catalog)
+    is_oci = catalog_has_oci(catalog)
+    want_type = "oci" if is_oci else "helm"
+    for repo in (catalog.get("spec") or {}).get("repositories") or []:
+        if repo.get("type") == want_type:
+            parsed = urlparse(repo["URL"])
+            scheme = "oci" if is_oci else parsed.scheme
+            repo["URL"] = f"{scheme}://{host}{parsed.path}"
+            return catalog
+    storage = (catalog.get("spec") or {}).get("storage") or {}
+    if storage.get("type") == want_type:
+        parsed = urlparse(storage["URL"])
+        scheme = "oci" if is_oci else parsed.scheme
+        storage["URL"] = f"{scheme}://{host}{parsed.path}"
+    return catalog
+
+
 def _oci_url_from_catalog(catalog: dict) -> str:
     for repo in (catalog.get("spec") or {}).get("repositories") or []:
         if repo.get("type") == "oci":
@@ -31,7 +61,7 @@ def _oci_url_from_catalog(catalog: dict) -> str:
     raise ValueError("catalog contains no oci repository")
 
 
-def _helm_url_from_catalog(catalog: dict) -> str:
+def helm_url_from_catalog(catalog: dict) -> str:
     for repo in (catalog.get("spec") or {}).get("repositories") or []:
         if repo.get("type") == "helm":
             return repo["URL"]
@@ -84,7 +114,7 @@ def _build_helm_repository(app: dict, catalog: dict, pull_secret: str | None = N
     spec = OrderedDict([("interval", "10m")])
     if pull_secret:
         spec["secretRef"] = OrderedDict([("name", pull_secret)])
-    spec["url"] = _helm_url_from_catalog(catalog)
+    spec["url"] = helm_url_from_catalog(catalog)
     return OrderedDict([
         ("apiVersion", "source.toolkit.fluxcd.io/v1"),
         ("kind", "HelmRepository"),
