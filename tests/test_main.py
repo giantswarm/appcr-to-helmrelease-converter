@@ -1119,6 +1119,18 @@ class TestOverrideRegistryUrlFlag:
         assert result.exit_code == 2
         assert "host" in result.output
 
+    def test_query_in_value_rejected(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--override-registry-url", "oci://host?foo=bar"])
+        assert result.exit_code == 2
+        assert "host" in result.output
+
+    def test_fragment_in_value_rejected(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = self._run(self._args() + ["--override-registry-url", "host#frag"])
+        assert result.exit_code == 2
+        assert "host" in result.output
+
     def test_empty_value_rejected(self):
         with patch("fetcher.fetch", return_value=_fetch_result()):
             result = self._run(self._args() + ["--override-registry-url", ""])

@@ -61,7 +61,7 @@ def _oci_url_from_catalog(catalog: dict) -> str:
     raise ValueError("catalog contains no oci repository")
 
 
-def _helm_url_from_catalog(catalog: dict) -> str:
+def helm_url_from_catalog(catalog: dict) -> str:
     for repo in (catalog.get("spec") or {}).get("repositories") or []:
         if repo.get("type") == "helm":
             return repo["URL"]
@@ -114,7 +114,7 @@ def _build_helm_repository(app: dict, catalog: dict, pull_secret: str | None = N
     spec = OrderedDict([("interval", "10m")])
     if pull_secret:
         spec["secretRef"] = OrderedDict([("name", pull_secret)])
-    spec["url"] = _helm_url_from_catalog(catalog)
+    spec["url"] = helm_url_from_catalog(catalog)
     return OrderedDict([
         ("apiVersion", "source.toolkit.fluxcd.io/v1"),
         ("kind", "HelmRepository"),

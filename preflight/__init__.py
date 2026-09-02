@@ -1,5 +1,5 @@
 from converter import catalog_has_oci
-from converter.resources import _helm_url_from_catalog
+from converter.resources import helm_url_from_catalog
 from converter.values_from import is_psp_removal_patch
 
 
@@ -177,7 +177,7 @@ def check_pull_secret(
 def check_registry_override(app: dict, catalog: dict, registry_override: str | None) -> list[PreflightIssue]:
     if not registry_override or "://" not in registry_override:
         return []
-    scheme = registry_override.split("://", 1)[0]
+    scheme = registry_override.split("://", 1)[0].lower()
     if catalog_has_oci(catalog):
         if scheme != "oci":
             return [PreflightError(
@@ -186,10 +186,10 @@ def check_registry_override(app: dict, catalog: dict, registry_override: str | N
             )]
         return []
     try:
-        helm_url = _helm_url_from_catalog(catalog)
+        helm_url = helm_url_from_catalog(catalog)
     except ValueError:
         return []
-    helm_scheme = helm_url.split("://", 1)[0] if "://" in helm_url else helm_url
+    helm_scheme = (helm_url.split("://", 1)[0] if "://" in helm_url else helm_url).lower()
     if scheme != helm_scheme:
         return [PreflightError(
             f'--override-registry-url "{registry_override}" has scheme "{scheme}" but the catalog\'s '

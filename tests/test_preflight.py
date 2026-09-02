@@ -550,6 +550,9 @@ class TestCheckRegistryOverride:
     def test_matching_oci_scheme_returns_no_issues(self):
         assert check_registry_override(_APP_IN_NS, _CATALOG_OCI, "oci://gsociprivate.azurecr.io") == []
 
+    def test_uppercase_oci_scheme_returns_no_issues(self):
+        assert check_registry_override(_APP_IN_NS, _CATALOG_OCI, "OCI://gsociprivate.azurecr.io") == []
+
     def test_mismatched_scheme_against_helm_catalog_is_an_error(self):
         issues = check_registry_override(_APP_IN_NS, _CATALOG_SINGLE_HELM, "oci://gsociprivate.azurecr.io")
         assert len(issues) == 1
@@ -562,6 +565,9 @@ class TestCheckRegistryOverride:
 
     def test_matching_helm_scheme_returns_no_issues(self):
         assert check_registry_override(_APP_IN_NS, _CATALOG_SINGLE_HELM, "https://mirror.example.io") == []
+
+    def test_matching_helm_scheme_case_variant_returns_no_issues(self):
+        assert check_registry_override(_APP_IN_NS, _CATALOG_SINGLE_HELM, "HTTPS://mirror.example.io") == []
 
     def test_helm_only_catalog_with_no_helm_entry_returns_no_issues(self):
         assert check_registry_override(_APP_IN_NS, _EMPTY_CATALOG, "https://mirror.example.io") == []

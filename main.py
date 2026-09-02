@@ -162,10 +162,10 @@ def _validate_registry_override(ctx, param, value):
         return None
     value = value.removesuffix("/")
     host = _host_only(value)
-    if not host or "/" in host:
+    if not host or any(c in host for c in "/?#"):
         raise click.BadParameter(
             f'"{value}" is not a registry host; pass a host like gsociprivate.azurecr.io '
-            "or registry.local:5000, optionally with a scheme, but without a path",
+            "or registry.local:5000, optionally with a scheme, but without a path, query, or fragment",
             param_hint="--override-registry-url",
         )
     return value
