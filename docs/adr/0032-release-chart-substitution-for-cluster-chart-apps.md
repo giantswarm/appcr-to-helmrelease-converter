@@ -78,6 +78,22 @@ Anything more risks Flux not adopting the existing Helm release, which for a
 workload cluster is a disaster. `--override-registry-url` still applies to the
 URL as for any app.
 
+**Installation values.** Cluster chart App CRs take the installation-wide
+`cluster-app-installation-values` ConfigMap from the `giantswarm` namespace
+through `extraConfigs` (priority 10). Flux reads `valuesFrom` only from the
+HelmRelease's own namespace, so that reference cannot be carried over as-is.
+The platform already covers it on the Flux side: the Kyverno ClusterPolicy
+`sync-cluster-app-configmap-to-org-namespaces` keeps a copy of the ConfigMap
+in every `org-*` namespace, and the MutatingPolicy
+`prepend-cluster-app-config-map-hr` prepends a same-namespace entry for it to
+any `org-*` HelmRelease whose OCIRepository URL is a known Cluster chart or
+Release chart. For a Cluster chart app the Conversion reads that entry from
+the copy in the App CR's namespace and emits it explicitly —
+`{kind: ConfigMap, name: cluster-app-installation-values}`, first in
+`valuesFrom` by its priority — exactly the entry the policy would add, so the
+policy has nothing to do. A missing copy is the ordinary missing-ConfigMap
+preflight error. Preflight prints a notice when it happens.
+
 **OCI only.** A Cluster chart App CR whose Catalog CR has no OCI repository is
 a hard preflight error. Moving off plain Helm repositories is a goal in its own
 right and should be done already; this is a fail-safe.
@@ -113,6 +129,12 @@ rewritten, so its comments are lost.
   Release CRs pin the same Cluster chart version.
 - **Checking the mirror instead of GSOCI** — answers reachability, not whether
   the Release chart exists.
+- **Dropping the installation values entry and leaving it to the Kyverno
+  policy** — the policy matches the OCIRepository URL against a fixed list, so
+  `--override-registry-url` would silently lose the values; and with
+  `failurePolicy: Ignore` a HelmRelease admitted while Kyverno is down
+  reconciles once without them. Emitting the entry also makes the generated
+  YAML say what Flux actually uses.
 
 ## Consequences
 

@@ -202,6 +202,8 @@ Preflight resolves the Release chart and stops with an error when any step fails
 3. `release-<provider>:<version>` must be published in public `gsoci.azurecr.io/charts/giantswarm` — checked there regardless of `--override-registry-url`, which still applies to the generated URL.
 4. The Catalog CR must have an OCI repository.
 
+The installation-wide `cluster-app-installation-values` ConfigMap, which Cluster chart App CRs take from `giantswarm` through `extraConfigs`, is read from the copy Kyverno keeps in the app's own `org-*` namespace, and emitted as a same-namespace `valuesFrom` entry — Flux cannot read values across namespaces. The copy must exist.
+
 On success it prints `Release chart substitution: cluster-aws@7.2.5 → release-aws@34.0.0 (Release CR aws-34.0.0)`.
 
 `global.release.version` in the app's values is left alone during the migration — it equals the version the Release chart carries. Remove it before the first upgrade; `cleanup` checks it is gone.

@@ -9,6 +9,7 @@ from converter.release_chart import (
     RELEASE_CHART_REGISTRY_HOST,
     RELEASE_CHART_REPOSITORY_PREFIX,
     cluster_chart_provider,
+    localize_installation_values,
     release_chart_name,
     release_cr_name,
     release_version_from_cluster,
@@ -101,13 +102,14 @@ def fetch(
     if catalog is None:
         raise FetchError(f"failed to fetch Catalog {catalog_name}: not found in default or giantswarm")
 
+    provider = cluster_chart_provider(app)
     core_api = client.CoreV1Api()
-    referenced_configs = _fetch_referenced_configs(app, core_api)
+    refs_app = localize_installation_values(app) if provider else app
+    referenced_configs = _fetch_referenced_configs(refs_app, core_api)
     dependency_helm_releases = _fetch_dependency_helm_releases(api, app, namespace)
     pull_secret_obj = (
         _fetch_one(core_api, "Secret", pull_secret, namespace) if pull_secret else None
     )
-    provider = cluster_chart_provider(app)
     release_chart = _fetch_release_chart_facts(api, app, provider) if provider else None
     return FetchResult(
         app=app,

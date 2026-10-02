@@ -5,6 +5,8 @@ from converter.release_chart import (
     CLUSTER_CHART_PROVIDERS,
     cluster_chart_name,
     cluster_chart_provider,
+    has_installation_values,
+    localize_installation_values,
     pinned_cluster_chart_version,
     release_chart_name,
     release_cr_name,
@@ -120,3 +122,58 @@ class TestSubstituteReleaseChart:
         plain[0]["spec"]["url"] = substituted[0]["spec"]["url"]
         plain[0]["spec"]["ref"]["tag"] = "34.0.0"
         assert plain == substituted
+
+
+_INSTALLATION_ENTRY = {"kind": "configMap", "name": "cluster-app-installation-values",
+                       "namespace": "giantswarm", "priority": 10}
+
+
+def _app_with(*extra_configs):
+    app = _app()
+    app["spec"]["extraConfigs"] = [dict(e) for e in extra_configs]
+    return app
+
+
+class TestInstallationValues:
+    def test_detected(self):
+        assert has_installation_values(_app_with(_INSTALLATION_ENTRY))
+
+    def test_not_detected_without_extra_configs(self):
+        assert not has_installation_values(_app())
+
+    def test_not_detected_in_other_namespace(self):
+        assert not has_installation_values(_app_with({**_INSTALLATION_ENTRY, "namespace": "org-acme"}))
+
+    def test_not_detected_for_secret(self):
+        assert not has_installation_values(_app_with({**_INSTALLATION_ENTRY, "kind": "secret"}))
+
+    def test_not_detected_for_other_name(self):
+        assert not has_installation_values(_app_with({**_INSTALLATION_ENTRY, "name": "other"}))
+
+    def test_kind_defaults_to_configmap(self):
+        entry = {k: v for k, v in _INSTALLATION_ENTRY.items() if k != "kind"}
+        assert has_installation_values(_app_with(entry))
+
+    def test_localize_moves_entry_to_app_namespace(self):
+        other = {"kind": "configMap", "name": "other", "namespace": "giantswarm"}
+        result = localize_installation_values(_app_with(_INSTALLATION_ENTRY, other))
+        assert result["spec"]["extraConfigs"] == [
+            {**_INSTALLATION_ENTRY, "namespace": "org-acme"},
+            other,
+        ]
+
+    def test_localize_does_not_mutate_input(self):
+        app = _app_with(_INSTALLATION_ENTRY)
+        localize_installation_values(app)
+        assert app["spec"]["extraConfigs"][0]["namespace"] == "giantswarm"
+
+    def test_localize_without_extra_configs_is_copy(self):
+        app = _app()
+        assert localize_installation_values(app) == app
+
+    def test_localized_entry_converts_to_same_namespace_reference_first(self):
+        app = _app_with(_INSTALLATION_ENTRY)
+        app["spec"]["userConfig"] = {"configMap": {"name": "user-values", "namespace": "org-acme"}}
+        hr = convert(localize_installation_values(app), _CATALOG)[1]
+        assert [e["name"] for e in hr["spec"]["valuesFrom"]] == ["cluster-app-installation-values", "user-values"]
+        assert "namespace" not in hr["spec"]["valuesFrom"][0]

@@ -59,3 +59,30 @@ def substitute_release_chart(app: dict, provider: str, release_version: str) -> 
     app["spec"]["name"] = release_chart_name(provider)
     app["spec"]["version"] = release_version
     return app
+
+
+# Kyverno copies this ConfigMap from `giantswarm` into every org-* namespace and
+# prepends it to Cluster chart HelmReleases there — see ADR 0032.
+INSTALLATION_VALUES_CONFIGMAP = "cluster-app-installation-values"
+_INSTALLATION_VALUES_SOURCE_NAMESPACE = "giantswarm"
+
+
+def _is_installation_values_entry(entry: dict) -> bool:
+    return (
+        entry.get("kind", "ConfigMap").lower() == "configmap"
+        and entry.get("name") == INSTALLATION_VALUES_CONFIGMAP
+        and entry.get("namespace") == _INSTALLATION_VALUES_SOURCE_NAMESPACE
+    )
+
+
+def has_installation_values(app: dict) -> bool:
+    return any(_is_installation_values_entry(e) for e in (app.get("spec") or {}).get("extraConfigs") or [])
+
+
+def localize_installation_values(app: dict) -> dict:
+    app = deepcopy(app)
+    app_namespace = app["metadata"]["namespace"]
+    for entry in app["spec"].get("extraConfigs") or []:
+        if _is_installation_values_entry(entry):
+            entry["namespace"] = app_namespace
+    return app

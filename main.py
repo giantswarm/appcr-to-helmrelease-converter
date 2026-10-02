@@ -15,7 +15,10 @@ import resolver
 from converter import convert, override_catalog_registry
 from converter.release_chart import (
     cluster_chart_name,
+    INSTALLATION_VALUES_CONFIGMAP,
     cluster_chart_provider,
+    has_installation_values,
+    localize_installation_values,
     release_chart_name,
     release_cr_name,
     substitute_release_chart,
@@ -280,9 +283,13 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
     app, catalog = result.app, result.catalog
     _dump_highlighted(_to_yaml_str([_strip_server_fields(app)]))
 
+    release_chart = result.release_chart
+    localized = bool(release_chart) and has_installation_values(app)
+    source_app = localize_installation_values(app) if localized else app
+
     _section("Preflight checks")
     issues = run_preflight(
-        app, catalog, result.referenced_configs, result.dependency_helm_releases,
+        source_app, catalog, result.referenced_configs, result.dependency_helm_releases,
         pull_secret_name=pull_secret, pull_secret=result.pull_secret,
         registry_override=registry_override,
         ignore_app_status=ignore_app_status,
@@ -301,7 +308,12 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
             f"ℹ️  Dependency check passed for HelmRelease `{checked}` based on `app-operator.giantswarm.io/depends-on` annotation of App CR. Verifies existence only — readiness is enforced by Flux at runtime.",
             err=True,
         )
-    release_chart = result.release_chart
+    if localized:
+        click.echo(
+            f"ℹ️  {INSTALLATION_VALUES_CONFIGMAP} read from its copy in {namespace} (synced there by "
+            f"Kyverno) instead of giantswarm — Flux can only read values from the HelmRelease's namespace.",
+            err=True,
+        )
     if release_chart:
         provider, release_version = release_chart.provider, release_chart.release_version
         click.echo(
@@ -318,7 +330,7 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
     _section("Resolve")
     try:
         resolution = resolver.resolve(
-            app,
+            source_app,
             result.referenced_configs,
             overrides=_parse_values_keys(values_key),
             assume_yes=assume_yes,
@@ -331,9 +343,8 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
     if registry_override:
         catalog = override_catalog_registry(catalog, registry_override)
         click.echo(f"ℹ️  Registry host overridden to {_host_only(registry_override)}.")
-    source_app = app
     if release_chart:
-        source_app = substitute_release_chart(app, release_chart.provider, release_chart.release_version)
+        source_app = substitute_release_chart(source_app, release_chart.provider, release_chart.release_version)
     docs = convert(source_app, catalog, resolution, pull_secret)
     yaml_str = _to_yaml_str(docs)
     _dump_highlighted(yaml_str)

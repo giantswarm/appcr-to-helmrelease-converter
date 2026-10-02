@@ -1389,3 +1389,43 @@ class TestCleanupReleaseVersion:
         assert "Remove global.release.version and delete App CR and Chart CR?" in result.output
         remove.assert_not_called()
         delete.assert_not_called()
+
+
+class TestInstallationValuesLocalized:
+    _ENTRY = {"kind": "configMap", "name": "cluster-app-installation-values", "namespace": "giantswarm",
+              "priority": 10}
+
+    def _run(self, app, refs):
+        result = FetchResult(app=app, catalog=_CLUSTER_CATALOG, referenced_configs=refs,
+                             release_chart=_release_facts())
+        with patch("fetcher.fetch", return_value=result):
+            return CliRunner().invoke(cli, ["migrate", "--name", "mycluster", "--namespace", "org-acme",
+                                            "--dry-run"])
+
+    def _app(self):
+        return {**_CLUSTER_APP, "spec": {**_CLUSTER_APP["spec"], "extraConfigs": [self._ENTRY]}}
+
+    def test_org_copy_is_used(self):
+        refs = {("ConfigMap", "cluster-app-installation-values", "org-acme"): {"data": {"values.yaml": "a: b"}}}
+        result = self._run(self._app(), refs)
+        assert result.exit_code == 0
+        assert "ℹ️  cluster-app-installation-values read from its copy in org-acme" in result.output
+        generated = yaml.safe_load_all(result.output.split("Generated Flux resources")[1]
+                                       .split("✅")[0].split("\n", 1)[1])
+        hr = [d for d in generated if d and d.get("kind") == "HelmRelease"][0]
+        assert hr["spec"]["valuesFrom"] == [{"kind": "ConfigMap", "name": "cluster-app-installation-values"}]
+
+    def test_missing_org_copy_is_preflight_error(self):
+        refs = {("ConfigMap", "cluster-app-installation-values", "org-acme"): None}
+        result = self._run(self._app(), refs)
+        assert result.exit_code == 1
+        assert 'ConfigMap "cluster-app-installation-values" not found in namespace "org-acme"' in result.output
+
+    def test_app_display_shows_original_namespace(self):
+        refs = {("ConfigMap", "cluster-app-installation-values", "org-acme"): {"data": {"values.yaml": "a: b"}}}
+        result = self._run(self._app(), refs)
+        assert "namespace: giantswarm" in result.output.split("Preflight checks")[0]
+
+    def test_no_notice_without_entry(self):
+        result = self._run(_CLUSTER_APP, {})
+        assert "read from its copy" not in result.output

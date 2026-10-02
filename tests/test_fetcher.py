@@ -603,3 +603,32 @@ class TestFetchReleaseChartFacts:
              patch("fetcher.oci_tag_exists", side_effect=RegistryError("registry down")):
             with pytest.raises(FetchError, match="registry down"):
                 fetch("mycluster", "org-acme")
+
+
+class TestFetchInstallationValuesLocalized:
+    _ENTRY = {"kind": "configMap", "name": "cluster-app-installation-values", "namespace": "giantswarm"}
+
+    def _fetch(self, app):
+        api = _mock_api(app_dict=app)
+        api.list_namespaced_custom_object.return_value = {"items": []}
+        core = _mock_core_api({
+            ("ConfigMap", "cluster-app-installation-values", "org-acme"): {"data": {"values.yaml": "a: b"}},
+            ("ConfigMap", "cluster-app-installation-values", "giantswarm"): {"data": {"values.yaml": "a: b"}},
+        })
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=api), \
+             patch("kubernetes.client.CoreV1Api", return_value=core), \
+             patch("fetcher.oci_tag_exists"):
+            return fetch(app["metadata"]["name"], app["metadata"]["namespace"])
+
+    def test_cluster_chart_app_reads_org_copy(self):
+        app = {**_CLUSTER_APP, "spec": {**_CLUSTER_APP["spec"], "extraConfigs": [self._ENTRY]}}
+        result = self._fetch(app)
+        assert list(result.referenced_configs) == [("ConfigMap", "cluster-app-installation-values", "org-acme")]
+        assert result.app == app
+
+    def test_ordinary_app_keeps_giantswarm_reference(self):
+        app = {**APP_DICT, "metadata": {"name": "my-app", "namespace": "org-acme"},
+               "spec": {**APP_DICT["spec"], "extraConfigs": [self._ENTRY]}}
+        result = self._fetch(app)
+        assert list(result.referenced_configs) == [("ConfigMap", "cluster-app-installation-values", "giantswarm")]

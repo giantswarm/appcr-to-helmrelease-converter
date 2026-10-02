@@ -124,6 +124,10 @@ _Avoid_: cluster app, provider chart
 The retagged `release-<provider>` chart (e.g. `release-aws:34.0.0`): the **Cluster chart** pinned by a **Release CR**, renamed, with its version set to the **Release CR** version. The only form of a cluster definition that a **Conversion** emits.
 _Avoid_: release (unqualified), retagged chart
 
+**Installation values**:
+The installation-wide `cluster-app-installation-values` ConfigMap that **Cluster chart** apps take values from. Its source lives in the `giantswarm` namespace; the platform keeps a copy in every `org-*` namespace for HelmReleases, which can only read values from their own namespace. A **Conversion** of a **Cluster chart** app reads the copy.
+_Avoid_: installation ConfigMap, cluster values
+
 **Release chart substitution**:
 The **Conversion** special case that, for an **App CR** whose chart is a **Cluster chart**, emits the **Release chart** in its place. Only the chart name and version change; every other part of the converted resources stays identical to an ordinary **Conversion**, so Flux adopts the existing Helm release.
 _Avoid_: chart swap, cluster special case
