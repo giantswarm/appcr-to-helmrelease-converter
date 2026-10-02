@@ -451,3 +451,184 @@ class TestFetchPullSecret:
              patch("kubernetes.client.CoreV1Api", return_value=core_api), \
              pytest.raises(FetchError):
             fetch("my-app", self._NS, None, "regcred")
+
+
+_CLUSTER_APP = {
+    "apiVersion": "application.giantswarm.io/v1alpha1",
+    "kind": "App",
+    "metadata": {"name": "mycluster", "namespace": "org-acme"},
+    "spec": {
+        "name": "cluster-aws",
+        "namespace": "org-acme",
+        "version": "7.2.5",
+        "catalog": "cluster",
+        "catalogNamespace": "giantswarm",
+        "kubeConfig": {"inCluster": True},
+    },
+}
+
+_CAPI_CLUSTER = {
+    "metadata": {"name": "mycluster", "labels": {"release.giantswarm.io/version": "34.0.0"}},
+}
+
+_RELEASE_CR = {"metadata": {"name": "aws-34.0.0"},
+               "spec": {"components": [{"name": "cluster-aws", "version": "7.2.5"}]}}
+
+
+class TestFetchReleaseChartFacts:
+    def _api(self, clusters=None, list_errors=(), release_cr=_RELEASE_CR, release_error=None):
+        api = _mock_api(app_dict=_CLUSTER_APP)
+        errors = list(list_errors)
+
+        def _list(group, version, namespace, plural, label_selector):
+            if errors:
+                raise errors.pop(0)
+            return {"items": [_CAPI_CLUSTER] if clusters is None else clusters}
+
+        def _get_cluster(group, version, plural, name):
+            if release_error is not None:
+                raise release_error
+            if release_cr is None:
+                raise ApiException(status=404)
+            return release_cr
+
+        api.list_namespaced_custom_object.side_effect = _list
+        api.get_cluster_custom_object.side_effect = _get_cluster
+        return api
+
+    def _fetch(self, api, published=True):
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=api), \
+             patch("kubernetes.client.CoreV1Api"), \
+             patch("fetcher.oci_tag_exists", return_value=published) as tag_exists:
+            result = fetch("mycluster", "org-acme")
+        return result, tag_exists
+
+    def test_not_fetched_for_ordinary_app(self):
+        api = _mock_api()
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=api), \
+             patch("kubernetes.client.CoreV1Api"), \
+             patch("fetcher.oci_tag_exists") as tag_exists:
+            result = fetch("my-app", "giantswarm")
+        assert result.release_chart is None
+        api.list_namespaced_custom_object.assert_not_called()
+        tag_exists.assert_not_called()
+
+    def test_full_facts(self):
+        api = self._api()
+        result, tag_exists = self._fetch(api)
+        facts = result.release_chart
+        assert facts.provider == "aws"
+        assert facts.clusters == [_CAPI_CLUSTER]
+        assert facts.release_version == "34.0.0"
+        assert facts.release_cr == _RELEASE_CR
+        assert facts.published is True
+        tag_exists.assert_called_once_with("gsoci.azurecr.io", "charts/giantswarm/release-aws", "34.0.0")
+
+    def test_lists_clusters_by_helm_instance_label_in_target_namespace(self):
+        api = self._api()
+        self._fetch(api)
+        kwargs = api.list_namespaced_custom_object.call_args.kwargs
+        assert kwargs["group"] == "cluster.x-k8s.io"
+        assert kwargs["version"] == "v1beta2"
+        assert kwargs["namespace"] == "org-acme"
+        assert kwargs["plural"] == "clusters"
+        assert kwargs["label_selector"] == "app.kubernetes.io/instance=mycluster"
+
+    def test_gets_release_cr_by_provider_and_version(self):
+        api = self._api()
+        self._fetch(api)
+        kwargs = api.get_cluster_custom_object.call_args.kwargs
+        assert kwargs == {"group": "release.giantswarm.io", "version": "v1alpha1",
+                          "plural": "releases", "name": "aws-34.0.0"}
+
+    def test_falls_back_to_v1beta1(self):
+        api = self._api(list_errors=[ApiException(status=404)])
+        result, _ = self._fetch(api)
+        assert api.list_namespaced_custom_object.call_args.kwargs["version"] == "v1beta1"
+        assert result.release_chart.release_version == "34.0.0"
+
+    def test_no_served_cluster_version_is_fetch_error(self):
+        api = self._api(list_errors=[ApiException(status=404), ApiException(status=404)])
+        with pytest.raises(FetchError, match="is not served"):
+            self._fetch(api)
+
+    def test_cluster_list_error_is_fetch_error(self):
+        api = self._api(list_errors=[ApiException(status=403, reason="Forbidden")])
+        with pytest.raises(FetchError, match="failed to list Clusters in org-acme: Forbidden"):
+            self._fetch(api)
+
+    def test_no_cluster_stops_early(self):
+        api = self._api(clusters=[])
+        result, tag_exists = self._fetch(api)
+        assert result.release_chart.clusters == []
+        assert result.release_chart.release_version is None
+        api.get_cluster_custom_object.assert_not_called()
+        tag_exists.assert_not_called()
+
+    def test_several_clusters_stop_early(self):
+        api = self._api(clusters=[_CAPI_CLUSTER, _CAPI_CLUSTER])
+        result, _ = self._fetch(api)
+        assert result.release_chart.release_version is None
+        api.get_cluster_custom_object.assert_not_called()
+
+    def test_missing_label_stops_early(self):
+        api = self._api(clusters=[{"metadata": {"name": "mycluster", "labels": {}}}])
+        result, _ = self._fetch(api)
+        assert result.release_chart.release_version is None
+        api.get_cluster_custom_object.assert_not_called()
+
+    def test_missing_release_cr_stops_early(self):
+        api = self._api(release_cr=None)
+        result, tag_exists = self._fetch(api)
+        assert result.release_chart.release_version == "34.0.0"
+        assert result.release_chart.release_cr is None
+        tag_exists.assert_not_called()
+
+    def test_release_cr_error_is_fetch_error(self):
+        api = self._api(release_error=ApiException(status=500, reason="Internal"))
+        with pytest.raises(FetchError, match="failed to fetch Release aws-34.0.0"):
+            self._fetch(api)
+
+    def test_unpublished_release_chart(self):
+        result, _ = self._fetch(self._api(), published=False)
+        assert result.release_chart.published is False
+
+    def test_registry_error_is_fetch_error(self):
+        from fetcher.registry import RegistryError
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=self._api()), \
+             patch("kubernetes.client.CoreV1Api"), \
+             patch("fetcher.oci_tag_exists", side_effect=RegistryError("registry down")):
+            with pytest.raises(FetchError, match="registry down"):
+                fetch("mycluster", "org-acme")
+
+
+class TestFetchInstallationValuesLocalized:
+    _ENTRY = {"kind": "configMap", "name": "cluster-app-installation-values", "namespace": "giantswarm"}
+
+    def _fetch(self, app):
+        api = _mock_api(app_dict=app)
+        api.list_namespaced_custom_object.return_value = {"items": []}
+        core = _mock_core_api({
+            ("ConfigMap", "cluster-app-installation-values", "org-acme"): {"data": {"values.yaml": "a: b"}},
+            ("ConfigMap", "cluster-app-installation-values", "giantswarm"): {"data": {"values.yaml": "a: b"}},
+        })
+        with patch("kubernetes.config.load_kube_config"), \
+             patch("kubernetes.client.CustomObjectsApi", return_value=api), \
+             patch("kubernetes.client.CoreV1Api", return_value=core), \
+             patch("fetcher.oci_tag_exists"):
+            return fetch(app["metadata"]["name"], app["metadata"]["namespace"])
+
+    def test_cluster_chart_app_reads_org_copy(self):
+        app = {**_CLUSTER_APP, "spec": {**_CLUSTER_APP["spec"], "extraConfigs": [self._ENTRY]}}
+        result = self._fetch(app)
+        assert list(result.referenced_configs) == [("ConfigMap", "cluster-app-installation-values", "org-acme")]
+        assert result.app == app
+
+    def test_ordinary_app_keeps_giantswarm_reference(self):
+        app = {**APP_DICT, "metadata": {"name": "my-app", "namespace": "org-acme"},
+               "spec": {**APP_DICT["spec"], "extraConfigs": [self._ENTRY]}}
+        result = self._fetch(app)
+        assert list(result.referenced_configs) == [("ConfigMap", "cluster-app-installation-values", "giantswarm")]

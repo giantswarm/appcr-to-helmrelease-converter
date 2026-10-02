@@ -8,7 +8,8 @@ It fetches the App CR and its Catalog CR from the cluster, converts them into th
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
 - `kubectl` access to the Management Cluster (or a valid `--context`)
-- The target app must already be running (the tool reads live cluster state)
+- The target app must already be running (the tool reads live cluster state), and its App CR must be deployed — see `--ignore-app-status`
+- For a Cluster chart app (`cluster-<provider>`): HTTPS access to `gsoci.azurecr.io` from where you run the tool
 
 ## Setup
 
@@ -37,6 +38,7 @@ uv run python main.py migrate --name <app-name> --namespace <namespace> --contex
 | `--assume-yes` / `-y` | Auto-confirm the proceed and revert-on-failure prompts. For `migrate`, never auto-confirms the destructive delete of App/Chart CRs — see the `cleanup` command below, where `-y` does skip that prompt. |
 | `--values-key KIND/NAME=KEY` | Pre-answer the `valuesKey` prompt for a multi-key ConfigMap/Secret (e.g. `ConfigMap/my-cm=values.yaml`). Repeatable. |
 | `--pull-secret NAME` | Name of an existing Secret holding catalog credentials. Emitted as `spec.secretRef` on the generated OCIRepository or HelmRepository. Must be in the App CR's namespace — Flux does not resolve it across namespaces. |
+| `--ignore-app-status` | Migrate even when the App CR is not deployed — its release status isn't `deployed`, or `status.version` differs from `spec.version`. Without it that is a preflight error. Skips only this check; `--assume-yes` does not imply it. |
 | `--override-registry-url HOST` | Replace the **host** of the registry URL the converter reads from the Catalog CR — for a mirrored registry the Catalog CR doesn't know about. Bare host, `host:port`, or either with a scheme; a path or empty value is a usage error. Only the host changes — the path and chart name are untouched. |
 
 **Example — preview before committing:**
@@ -77,7 +79,7 @@ uv run python main.py migrate --name loki --namespace monitoring \
 The tool will:
 
 1. Fetch the App CR and its Catalog CR from the cluster
-2. Run preflight checks — including verifying that any `depends-on` dependencies exist as HelmReleases, and that a `--pull-secret` Secret exists in the App CR's namespace — and print any warnings
+2. Run preflight checks — including verifying that the App CR is deployed, that any `depends-on` dependencies exist as HelmReleases, that a `--pull-secret` Secret exists in the App CR's namespace, and, for a Cluster chart app, that its Release chart can be resolved (see [Cluster chart apps](#cluster-chart-apps)) — and print any warnings
 3. Resolve `valuesKey` for each ConfigMap/Secret referenced by the app — prompts you to choose when a resource has multiple data keys (or takes the value from `--values-key`; with `--assume-yes` an unresolved multi-key resource is a hard error naming the flag to pass). A resource with zero data keys is never an error: it's carried into `valuesFrom` as `optional: true` with a warning, instead
 4. Show you the generated Flux YAML (and save it if `--output` is set), then ask for confirmation (skipped by `--assume-yes`)
 5. Suspend the App CR (and its Chart CR on the workload cluster if applicable)
@@ -85,7 +87,7 @@ The tool will:
 7. Watch the HelmRelease until it becomes ready — on failure, asks whether to roll back. If any suspend step found the App CR or Chart CR _already_ paused before this run, a note with the matching `kubectl` command is printed so you can undo that state manually if needed
 8. Clean up the now-redundant App CR and Chart CR:
    - **Flux-managed app:** prints the exact `uv run python main.py cleanup ...` command to run — the recommended path, once you've committed the generated Flux resources to your gitops repo and removed the App CR from it. The kubectl commands to remove finalizers and delete both CRs (Chart CR first) are still printed underneath as a manual fallback.
-   - **Non-Flux-managed app:** prompts `y/N` to delete both CRs automatically (Chart CR first, App CR second).
+   - **Non-Flux-managed app:** prompts `y/N` to delete both CRs automatically (Chart CR first, App CR second). For a Cluster chart app the same prompt also removes `global.release.version` from the live values sources.
 
 ### `cleanup`
 
@@ -114,6 +116,9 @@ Phase two of the migration: run once the converted resources have been committed
 4. The HelmRelease's observed generation matches its current generation (not describing a stale revision)
 5. _(Flux-managed App CRs only)_ The HelmRelease carries Flux's kustomize labels — proof gitops has adopted it
 6. _(Flux-managed App CRs only)_ The App CR has Flux reconciliation disabled — proof Flux won't recreate it once deleted
+7. _(Flux-managed Cluster chart apps only)_ No live ConfigMap or Secret behind the HelmRelease's `valuesFrom` still sets `global.release.version` — remove it from your gitops repository alongside the App CR
+
+For a non-Flux-managed Cluster chart app, check 7 becomes an action instead: the deletion prompt also removes `global.release.version` from the live values sources (`-y` confirms it, `--dry-run` only lists them). The YAML under that key is rewritten, so its comments are lost.
 
 If any check fails, `cleanup` reports every failure and exits non-zero without deleting anything.
 
@@ -185,6 +190,23 @@ Depending on the Catalog type:
 Config sources (`spec.config`, `spec.userConfig`, `spec.extraConfigs`) are carried over as `valuesFrom` entries on the HelmRelease, with priorities preserved. Labels and annotations are carried over from the App CR onto every generated resource (HelmRelease and the OCIRepository/HelmRepository), filtering out Flux- and GS-specific keys.
 
 If the App CR carries `app-operator.giantswarm.io/depends-on`, the converted HelmRelease will have a `spec.dependsOn` list. The preflight check verifies that each referenced dependency HelmRelease exists — existence only, not readiness. Flux enforces ordering and waits for dependencies to become Ready at runtime.
+
+### Cluster chart apps
+
+An App CR for a Cluster chart — `spec.name` of `cluster-aws`, `cluster-azure`, `cluster-vsphere`, `cluster-cloud-director`, `cluster-eks`, `cluster-proxmox` or `cluster-aks` — is always converted to its **Release chart**, `release-<provider>`, at the release version, instead of the Cluster chart itself (see [the retagging workflow](https://github.com/giantswarm/releases/blob/master/docs/workflows-retagging-cluster-charts.md) and ADR 0032). Only the chart name and the tag change; every name, namespace and values source stays as for any other app, so Flux adopts the existing Helm release. The one exception is metadata: an `app.kubernetes.io/name` or `app` label whose value is the Cluster chart name — app-admission-controller sets `app.kubernetes.io/name` to the chart name on every App CR — becomes the Release chart name on the generated resources. Any other value is kept.
+
+Preflight resolves the Release chart and stops with an error when any step fails:
+
+1. The workload cluster's CAPI Cluster — the one labelled `app.kubernetes.io/instance=<release name>` in the app's target namespace — gives the release version from its `release.giantswarm.io/version` label.
+2. The Release CR `<provider>-<version>` must exist and pin the App CR's own `spec.version` for the Cluster chart.
+3. `release-<provider>:<version>` must be published in public `gsoci.azurecr.io/charts/giantswarm` — checked there regardless of `--override-registry-url`, which still applies to the generated URL.
+4. The Catalog CR must have an OCI repository.
+
+The installation-wide `cluster-app-installation-values` ConfigMap, which Cluster chart App CRs take from `giantswarm` through `extraConfigs`, is read from the copy Kyverno keeps in the app's own `org-*` namespace, and emitted as a same-namespace `valuesFrom` entry — Flux cannot read values across namespaces. The copy must exist.
+
+On success it prints `Release chart substitution: cluster-aws@7.2.5 → release-aws@34.0.0 (Release CR aws-34.0.0)`.
+
+`global.release.version` in the app's values is left alone during the migration — it equals the version the Release chart carries. Remove it before the first upgrade; `cleanup` checks it is gone.
 
 ## Running tests
 

@@ -13,8 +13,24 @@ import fetcher
 import migrator
 import resolver
 from converter import convert, override_catalog_registry
+from converter.release_chart import (
+    cluster_chart_name,
+    INSTALLATION_VALUES_CONFIGMAP,
+    cluster_chart_provider,
+    has_installation_values,
+    localize_installation_values,
+    release_chart_name,
+    release_cr_name,
+    substitute_release_chart,
+)
 from fetcher import FetchError
 from migrator.cleanup import delete_app_and_chart, flux_cleanup_message, verify_migration
+from migrator.release_values import (
+    RELEASE_VERSION_VALUE,
+    find_release_version_sources,
+    get_helm_release,
+    remove_release_version,
+)
 from migrator.resume import resume_app_and_chart
 from preflight import PreflightError, run_preflight
 
@@ -139,6 +155,39 @@ def _delete_and_report(api, chart_api, app: dict) -> None:
         click.echo("✅ App CR and Chart CR deleted.")
 
 
+def _release_version_leftovers_or_exit(helm_release: dict) -> list:
+    try:
+        return find_release_version_sources(migrator.core_client(), helm_release)
+    except migrator.MigratorError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+
+
+def _announce_release_version_removal(leftovers) -> None:
+    for source in leftovers:
+        click.echo(
+            f"Will remove {RELEASE_VERSION_VALUE} from {source} — the Release chart carries it. "
+            f"The YAML under that key is rewritten; comments are not preserved."
+        )
+
+
+def _delete_prompt(leftovers) -> str:
+    if leftovers:
+        return f"Remove {RELEASE_VERSION_VALUE} and delete App CR and Chart CR?"
+    return "Delete App CR and Chart CR?"
+
+
+def _remove_release_version_and_report(leftovers) -> None:
+    core_api = migrator.core_client()
+    for source in leftovers:
+        try:
+            remove_release_version(core_api, source)
+        except migrator.MigratorError as e:
+            click.echo(f"❌ {e}", err=True)
+            raise SystemExit(1)
+        click.echo(f"✅ Removed {RELEASE_VERSION_VALUE} from {source}.")
+
+
 def _resume_and_report(api, chart_api, app: dict) -> None:
     try:
         notes = resume_app_and_chart(api, chart_api, app)
@@ -216,8 +265,13 @@ def _parse_values_keys(entries) -> dict[tuple[str, str], str]:
          "Host and optional port only — the chart path from the Catalog CR is kept. "
          "Use it when the installation pulls charts from a mirror of the catalog's registry.",
 )
+@click.option(
+    "--ignore-app-status", "ignore_app_status", is_flag=True, default=False,
+    help="Migrate even when the App CR is not deployed (release status other than deployed, or "
+         "status.version differing from spec.version). Skips only that check.",
+)
 def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, values_key, pull_secret,
-                registry_override):
+                registry_override, ignore_app_status):
     _section("Fetch")
     click.echo(f'Fetching "{name}" from namespace "{namespace}"...')
     try:
@@ -229,11 +283,17 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
     app, catalog = result.app, result.catalog
     _dump_highlighted(_to_yaml_str([_strip_server_fields(app)]))
 
+    release_chart = result.release_chart
+    localized = bool(release_chart) and has_installation_values(app)
+    source_app = localize_installation_values(app) if localized else app
+
     _section("Preflight checks")
     issues = run_preflight(
-        app, catalog, result.referenced_configs, result.dependency_helm_releases,
+        source_app, catalog, result.referenced_configs, result.dependency_helm_releases,
         pull_secret_name=pull_secret, pull_secret=result.pull_secret,
         registry_override=registry_override,
+        ignore_app_status=ignore_app_status,
+        release_chart=result.release_chart,
     )
     warnings = [i for i in issues if not isinstance(i, PreflightError)]
     errors = [i for i in issues if isinstance(i, PreflightError)]
@@ -248,6 +308,20 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
             f"ℹ️  Dependency check passed for HelmRelease `{checked}` based on `app-operator.giantswarm.io/depends-on` annotation of App CR. Verifies existence only — readiness is enforced by Flux at runtime.",
             err=True,
         )
+    if localized:
+        click.echo(
+            f"ℹ️  {INSTALLATION_VALUES_CONFIGMAP} read from its copy in {namespace} (synced there by "
+            f"Kyverno) instead of giantswarm — Flux can only read values from the HelmRelease's namespace.",
+            err=True,
+        )
+    if release_chart:
+        provider, release_version = release_chart.provider, release_chart.release_version
+        click.echo(
+            f"ℹ️  Release chart substitution: {cluster_chart_name(provider)}@{app['spec']['version']} → "
+            f"{release_chart_name(provider)}@{release_version} "
+            f"(Release CR {release_cr_name(provider, release_version)})",
+            err=True,
+        )
     if not issues:
         click.echo("No issues found")
     else:
@@ -256,7 +330,7 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
     _section("Resolve")
     try:
         resolution = resolver.resolve(
-            app,
+            source_app,
             result.referenced_configs,
             overrides=_parse_values_keys(values_key),
             assume_yes=assume_yes,
@@ -269,7 +343,9 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
     if registry_override:
         catalog = override_catalog_registry(catalog, registry_override)
         click.echo(f"ℹ️  Registry host overridden to {_host_only(registry_override)}.")
-    docs = convert(app, catalog, resolution, pull_secret)
+    if release_chart:
+        source_app = substitute_release_chart(source_app, release_chart.provider, release_chart.release_version)
+    docs = convert(source_app, catalog, resolution, pull_secret)
     yaml_str = _to_yaml_str(docs)
     _dump_highlighted(yaml_str)
 
@@ -325,7 +401,10 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
     if migrator.is_flux_managed(app):
         click.echo(flux_cleanup_message(app, context))
     else:
-        if click.confirm("Delete App CR and Chart CR?", default=False):
+        leftovers = _release_version_leftovers_or_exit(docs[1]) if release_chart else []
+        _announce_release_version_removal(leftovers)
+        if click.confirm(_delete_prompt(leftovers), default=False):
+            _remove_release_version_and_report(leftovers)
             _delete_and_report(api, chart_api, app)
 
 
@@ -351,6 +430,18 @@ def cleanup_cmd(name, namespace, context, dry_run, assume_yes):
 
     _section("Verify")
     failures = verify_migration(api, app)
+    leftovers = []
+    if not failures and cluster_chart_provider(app):
+        try:
+            leftovers = find_release_version_sources(migrator.core_client(), get_helm_release(api, app))
+        except migrator.MigratorError as e:
+            failures.append(str(e))
+        if leftovers and migrator.is_flux_managed(app):
+            failures += [
+                f"{source} still sets {RELEASE_VERSION_VALUE} — remove it from your gitops repository, "
+                f"let Flux reconcile, then re-run"
+                for source in leftovers
+            ]
     if failures:
         for failure in failures:
             click.echo(f"❌ {failure}", err=True)
@@ -369,14 +460,16 @@ def cleanup_cmd(name, namespace, context, dry_run, assume_yes):
             "⚠️  This does not verify the App CR was removed from your gitops repo. "
             "If it is still there, Flux will re-apply it."
         )
+    _announce_release_version_removal(leftovers)
 
     if dry_run:
         click.echo("\n✅ Dry run complete — halting before deletion.")
         raise SystemExit(0)
 
-    if not (assume_yes or click.confirm("Delete App CR and Chart CR?", default=False)):
+    if not (assume_yes or click.confirm(_delete_prompt(leftovers), default=False)):
         raise SystemExit(0)
 
+    _remove_release_version_and_report(leftovers)
     _delete_and_report(api, chart_api, app)
 
 
