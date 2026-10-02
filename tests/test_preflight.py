@@ -1,7 +1,9 @@
+from fetcher import ReleaseChartFacts
 from preflight import (
     PreflightError,
     PreflightIssue,
     PreflightWarning,
+    check_app_status,
     check_dependency_helm_releases,
     check_empty_values_from_names,
     check_flux_managed,
@@ -12,6 +14,7 @@ from preflight import (
     check_psp_removal_patch,
     check_pull_secret,
     check_registry_override,
+    check_release_chart,
     run_preflight,
 )
 
@@ -34,6 +37,11 @@ APP_WITHOUT_NAMESPACE_CONFIG = {
 }
 
 _EMPTY_CATALOG = {}
+
+
+def _deployed(app):
+    version = (app.get("spec") or {}).get("version")
+    return {**app, "status": {"release": {"status": "deployed"}, "version": version}}
 
 _CATALOG_MULTI_HELM = {
     "spec": {"repositories": [
@@ -360,16 +368,16 @@ class TestCheckFluxManaged:
 
 class TestRunPreflight:
     def test_returns_warning_when_namespace_config_present(self):
-        issues = run_preflight(APP_WITH_NAMESPACE_CONFIG, _CATALOG_OCI)
+        issues = run_preflight(_deployed(APP_WITH_NAMESPACE_CONFIG), _CATALOG_OCI)
         assert len(issues) == 1
         assert isinstance(issues[0], PreflightWarning)
 
     def test_returns_empty_list_when_no_issues(self):
-        assert run_preflight(APP_WITHOUT_NAMESPACE_CONFIG, _CATALOG_OCI) == []
+        assert run_preflight(_deployed(APP_WITHOUT_NAMESPACE_CONFIG), _CATALOG_OCI) == []
 
     def test_collects_empty_values_from_name_warnings(self):
         app = {"spec": {"config": {"secret": {"name": "", "namespace": "org-x"}}}}
-        issues = run_preflight(app, _CATALOG_OCI)
+        issues = run_preflight(_deployed(app), _CATALOG_OCI)
         assert len(issues) == 1
         assert isinstance(issues[0], PreflightWarning)
 
@@ -378,14 +386,14 @@ class TestRunPreflight:
             "metadata": {"namespace": "ns"},
             "spec": {"extraConfigs": [{"name": "psp-removal-patch", "namespace": "ns"}]},
         }
-        issues = run_preflight(app, _CATALOG_OCI)
+        issues = run_preflight(_deployed(app), _CATALOG_OCI)
         assert len(issues) == 1
         assert isinstance(issues[0], PreflightWarning)
         assert "psp-removal-patch" in str(issues[0])
 
     def test_collects_catalog_warning_alongside_app_warnings(self):
         app = {"spec": {"namespaceConfig": {"annotations": {}}}}
-        issues = run_preflight(app, _CATALOG_MULTI_HELM)
+        issues = run_preflight(_deployed(app), _CATALOG_MULTI_HELM)
         assert len(issues) >= 2
         assert all(isinstance(i, PreflightWarning) for i in issues)
 
@@ -400,16 +408,16 @@ class TestRunPreflight:
                 },
             },
         }
-        issues = run_preflight(app, _CATALOG_OCI)
+        issues = run_preflight(_deployed(app), _CATALOG_OCI)
         assert any(isinstance(i, PreflightError) for i in issues)
         assert any(isinstance(i, PreflightWarning) for i in issues)
 
     def test_oci_fallback_warning_surfaced_by_run_preflight(self):
-        issues = run_preflight(APP_WITHOUT_NAMESPACE_CONFIG, _CATALOG_SINGLE_HELM)
+        issues = run_preflight(_deployed(APP_WITHOUT_NAMESPACE_CONFIG), _CATALOG_SINGLE_HELM)
         assert any("HelmRepository" in str(i) for i in issues)
 
     def test_flux_managed_warning_surfaced_by_run_preflight(self):
-        issues = run_preflight(_APP_FLUX_MANAGED, _CATALOG_OCI)
+        issues = run_preflight(_deployed(_APP_FLUX_MANAGED), _CATALOG_OCI)
         assert any("gitops" in str(i) for i in issues)
 
 
@@ -448,7 +456,7 @@ class TestCheckDependencyHelmReleases:
 
     def test_surfaced_by_run_preflight(self):
         app = {"metadata": {"name": "my-app", "namespace": "giantswarm"}, "spec": {}}
-        issues = run_preflight(app, _EMPTY_CATALOG, dependency_helm_releases={"coredns": None})
+        issues = run_preflight(_deployed(app), _EMPTY_CATALOG, dependency_helm_releases={"coredns": None})
         assert any(isinstance(i, PreflightError) and "coredns" in str(i) for i in issues)
 
 
@@ -508,12 +516,12 @@ class TestCheckPullSecret:
         assert isinstance(issues[0], PreflightWarning)
 
     def test_missing_secret_surfaced_by_run_preflight(self):
-        issues = run_preflight(_APP_IN_NS, _CATALOG_OCI, pull_secret_name="regcred", pull_secret=None)
+        issues = run_preflight(_deployed(_APP_IN_NS), _CATALOG_OCI, pull_secret_name="regcred", pull_secret=None)
         assert any(isinstance(i, PreflightError) and "regcred" in str(i) for i in issues)
 
     def test_shape_warning_surfaced_by_run_preflight(self):
         issues = run_preflight(
-            _APP_IN_NS, _CATALOG_OCI, pull_secret_name="regcred", pull_secret=_BASIC_AUTH_SECRET
+            _deployed(_APP_IN_NS), _CATALOG_OCI, pull_secret_name="regcred", pull_secret=_BASIC_AUTH_SECRET
         )
         assert any(isinstance(i, PreflightWarning) and "regcred" in str(i) for i in issues)
 
@@ -573,10 +581,150 @@ class TestCheckRegistryOverride:
         assert check_registry_override(_APP_IN_NS, _EMPTY_CATALOG, "https://mirror.example.io") == []
 
     def test_default_is_no_op_via_run_preflight(self):
-        assert run_preflight(APP_WITHOUT_NAMESPACE_CONFIG, _CATALOG_OCI) == []
+        assert run_preflight(_deployed(APP_WITHOUT_NAMESPACE_CONFIG), _CATALOG_OCI) == []
 
     def test_mismatch_surfaced_by_run_preflight(self):
         issues = run_preflight(
-            APP_WITHOUT_NAMESPACE_CONFIG, _CATALOG_OCI, registry_override="https://gsociprivate.azurecr.io"
+            _deployed(APP_WITHOUT_NAMESPACE_CONFIG), _CATALOG_OCI, registry_override="https://gsociprivate.azurecr.io"
         )
         assert any(isinstance(i, PreflightError) for i in issues)
+
+
+class TestCheckAppStatus:
+    def _app(self, release_status="deployed", deployed="1.2.3", wanted="1.2.3"):
+        status = {}
+        if release_status is not None:
+            status["release"] = {"status": release_status}
+        if deployed is not None:
+            status["version"] = deployed
+        return {"spec": {"version": wanted}, "status": status}
+
+    def test_deployed_app_passes(self):
+        assert check_app_status(self._app(), _EMPTY_CATALOG) == []
+
+    def test_failed_release_is_error(self):
+        issues = check_app_status(self._app(release_status="failed"), _EMPTY_CATALOG)
+        assert len(issues) == 1
+        assert isinstance(issues[0], PreflightError)
+        assert 'release status "failed"' in str(issues[0])
+        assert "--ignore-app-status" in str(issues[0])
+
+    def test_version_mismatch_is_error(self):
+        issues = check_app_status(self._app(deployed="1.2.2"), _EMPTY_CATALOG)
+        assert isinstance(issues[0], PreflightError)
+        assert 'status.version "1.2.2"' in str(issues[0])
+        assert 'spec.version "1.2.3"' in str(issues[0])
+
+    def test_missing_status_is_error(self):
+        issues = check_app_status({"spec": {}}, _EMPTY_CATALOG)
+        assert isinstance(issues[0], PreflightError)
+        assert 'release status "<unset>"' in str(issues[0])
+        assert 'status.version "<unset>"' in str(issues[0])
+        assert 'spec.version "<unset>"' in str(issues[0])
+
+    def test_ignore_turns_error_into_warning(self):
+        issues = check_app_status(self._app(release_status="failed"), _EMPTY_CATALOG, ignore_app_status=True)
+        assert len(issues) == 1
+        assert isinstance(issues[0], PreflightWarning)
+        assert 'release status "failed"' in str(issues[0])
+
+    def test_ignore_on_deployed_app_is_silent(self):
+        assert check_app_status(self._app(), _EMPTY_CATALOG, ignore_app_status=True) == []
+
+    def test_surfaced_by_run_preflight(self):
+        issues = run_preflight(self._app(release_status="pending-upgrade"), _CATALOG_OCI)
+        assert any(isinstance(i, PreflightError) and "pending-upgrade" in str(i) for i in issues)
+
+    def test_ignore_passed_through_run_preflight(self):
+        issues = run_preflight(self._app(release_status="failed"), _CATALOG_OCI, ignore_app_status=True)
+        assert not any(isinstance(i, PreflightError) for i in issues)
+
+
+_CLUSTER_APP = {
+    "metadata": {"name": "mycluster", "namespace": "org-acme"},
+    "spec": {"name": "cluster-aws", "namespace": "org-acme", "version": "7.2.5",
+             "kubeConfig": {"inCluster": True}},
+}
+_CAPI_CLUSTER = {"metadata": {"name": "mycluster", "labels": {"release.giantswarm.io/version": "34.0.0"}}}
+_RELEASE_CR = {"spec": {"components": [{"name": "cluster-aws", "version": "7.2.5"}]}}
+_CLUSTER_CATALOG = {"metadata": {"name": "cluster"},
+                    "spec": {"repositories": [{"type": "oci", "URL": "oci://gsoci.azurecr.io/charts/giantswarm/"}]}}
+
+
+def _facts(**overrides):
+    values = dict(provider="aws", clusters=[_CAPI_CLUSTER], release_version="34.0.0",
+                  release_cr=_RELEASE_CR, published=True)
+    values.update(overrides)
+    return ReleaseChartFacts(**values)
+
+
+class TestCheckReleaseChart:
+    def _errors(self, facts, catalog=_CLUSTER_CATALOG):
+        issues = check_release_chart(_CLUSTER_APP, catalog, facts)
+        assert all(isinstance(i, PreflightError) for i in issues)
+        return [str(i) for i in issues]
+
+    def test_no_facts_is_no_op(self):
+        assert check_release_chart(_CLUSTER_APP, _CLUSTER_CATALOG, None) == []
+
+    def test_complete_facts_pass(self):
+        assert self._errors(_facts()) == []
+
+    def test_helm_only_catalog_is_error(self):
+        catalog = {"metadata": {"name": "cluster"},
+                   "spec": {"repositories": [{"type": "helm", "URL": "https://x"}]}}
+        errors = self._errors(_facts(), catalog)
+        assert len(errors) == 1
+        assert 'Catalog "cluster" has none' in errors[0]
+        assert "release-aws" in errors[0]
+
+    def test_no_cluster_is_error(self):
+        errors = self._errors(_facts(clusters=[], release_version=None, release_cr=None, published=None))
+        assert errors == [
+            'no Cluster labelled app.kubernetes.io/instance=mycluster found in namespace "org-acme"; '
+            "cannot determine the release version for the Release chart"
+        ]
+
+    def test_several_clusters_is_error(self):
+        other = {"metadata": {"name": "other"}}
+        errors = self._errors(_facts(clusters=[_CAPI_CLUSTER, other], release_version=None))
+        assert len(errors) == 1
+        assert "2 Clusters" in errors[0]
+        assert "(mycluster, other)" in errors[0]
+
+    def test_missing_version_label_is_error(self):
+        errors = self._errors(_facts(release_version=None, release_cr=None, published=None))
+        assert errors == [
+            'Cluster "mycluster" has no release.giantswarm.io/version label; '
+            "cannot determine the release version for the Release chart"
+        ]
+
+    def test_missing_release_cr_is_error(self):
+        errors = self._errors(_facts(release_cr=None, published=None))
+        assert errors == ['Release CR "aws-34.0.0" not found (named by Cluster "mycluster")']
+
+    def test_version_mismatch_is_error(self):
+        release = {"spec": {"components": [{"name": "cluster-aws", "version": "7.2.6"}]}}
+        errors = self._errors(_facts(release_cr=release))
+        assert len(errors) == 1
+        assert "pins cluster-aws 7.2.6" in errors[0]
+        assert "spec.version is 7.2.5" in errors[0]
+
+    def test_release_cr_without_cluster_chart_is_error(self):
+        errors = self._errors(_facts(release_cr={"spec": {"components": []}}))
+        assert "pins cluster-aws <none>" in errors[0]
+
+    def test_unpublished_release_chart_is_error(self):
+        errors = self._errors(_facts(published=False))
+        assert errors == [
+            "release-aws:34.0.0 not found in gsoci.azurecr.io/charts/giantswarm; "
+            'there is no Release chart for Release CR "aws-34.0.0"'
+        ]
+
+    def test_catalog_and_resolution_errors_both_reported(self):
+        catalog = {"metadata": {"name": "cluster"}, "spec": {}}
+        assert len(self._errors(_facts(published=False), catalog)) == 2
+
+    def test_surfaced_by_run_preflight(self):
+        issues = run_preflight(_deployed(_CLUSTER_APP), _CLUSTER_CATALOG, release_chart=_facts(published=False))
+        assert any(isinstance(i, PreflightError) and "release-aws:34.0.0" in str(i) for i in issues)

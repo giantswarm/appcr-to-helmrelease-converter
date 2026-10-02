@@ -101,6 +101,17 @@ class TestFluxCleanupMessage:
         assert "kubectl delete app" in msg
 
 
+class TestFluxCleanupMessageClusterChart:
+    def test_cluster_chart_app_mentions_release_version_value(self):
+        app = {**_APP, "spec": {**(_APP.get("spec") or {}), "name": "cluster-aws"}}
+        msg = flux_cleanup_message(app)
+        assert "global.release.version" in msg
+        assert "refuses to run" in msg
+
+    def test_ordinary_app_does_not_mention_release_version_value(self):
+        assert "global.release.version" not in flux_cleanup_message(_APP)
+
+
 class TestDeleteAppAndChart:
     def _apis(self, app_cr=None, chart_cr=None):
         app_api = MagicMock()

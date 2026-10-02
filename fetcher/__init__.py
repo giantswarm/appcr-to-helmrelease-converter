@@ -5,12 +5,38 @@ from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 from kubernetes.config.config_exception import ConfigException
 
+from converter.release_chart import (
+    RELEASE_CHART_REGISTRY_HOST,
+    RELEASE_CHART_REPOSITORY_PREFIX,
+    cluster_chart_provider,
+    release_chart_name,
+    release_cr_name,
+    release_version_from_cluster,
+)
+from converter.resources import release_name
+from fetcher.registry import RegistryError, oci_tag_exists
+
 
 _DEPENDS_ON_ANNOTATION = "app-operator.giantswarm.io/depends-on"
+
+_CLUSTER_GROUP = "cluster.x-k8s.io"
+_CLUSTER_VERSIONS = ("v1beta2", "v1beta1")
+_HELM_INSTANCE_LABEL = "app.kubernetes.io/instance"
+_RELEASE_GROUP = "release.giantswarm.io"
+_RELEASE_VERSION = "v1alpha1"
 
 
 class FetchError(Exception):
     pass
+
+
+@dataclass
+class ReleaseChartFacts:
+    provider: str
+    clusters: list = field(default_factory=list)
+    release_version: str | None = None
+    release_cr: dict | None = None
+    published: bool | None = None
 
 
 @dataclass
@@ -20,6 +46,7 @@ class FetchResult:
     referenced_configs: dict = field(default_factory=dict)
     dependency_helm_releases: dict = field(default_factory=dict)
     pull_secret: dict | None = None
+    release_chart: ReleaseChartFacts | None = None
 
 
 def _api_message(e: ApiException) -> str:
@@ -80,13 +107,70 @@ def fetch(
     pull_secret_obj = (
         _fetch_one(core_api, "Secret", pull_secret, namespace) if pull_secret else None
     )
+    provider = cluster_chart_provider(app)
+    release_chart = _fetch_release_chart_facts(api, app, provider) if provider else None
     return FetchResult(
         app=app,
         catalog=catalog,
         referenced_configs=referenced_configs,
         dependency_helm_releases=dependency_helm_releases,
         pull_secret=pull_secret_obj,
+        release_chart=release_chart,
     )
+
+
+def _list_clusters(api, namespace: str, helm_release: str) -> list:
+    selector = f"{_HELM_INSTANCE_LABEL}={helm_release}"
+    for version in _CLUSTER_VERSIONS:
+        try:
+            result = api.list_namespaced_custom_object(
+                group=_CLUSTER_GROUP,
+                version=version,
+                namespace=namespace,
+                plural="clusters",
+                label_selector=selector,
+            )
+        except ApiException as e:
+            if e.status == 404:
+                continue
+            raise FetchError(f"failed to list Clusters in {namespace}: {_api_message(e)}") from e
+        return result.get("items") or []
+    raise FetchError(
+        f"failed to list Clusters in {namespace}: {_CLUSTER_GROUP} "
+        f"{'/'.join(_CLUSTER_VERSIONS)} is not served by this cluster"
+    )
+
+
+def _get_release_cr(api, name: str) -> dict | None:
+    try:
+        return api.get_cluster_custom_object(
+            group=_RELEASE_GROUP, version=_RELEASE_VERSION, plural="releases", name=name,
+        )
+    except ApiException as e:
+        if e.status == 404:
+            return None
+        raise FetchError(f"failed to fetch Release {name}: {_api_message(e)}") from e
+
+
+def _fetch_release_chart_facts(api, app: dict, provider: str) -> ReleaseChartFacts:
+    facts = ReleaseChartFacts(
+        provider=provider,
+        clusters=_list_clusters(api, app["spec"]["namespace"], release_name(app)),
+    )
+    if len(facts.clusters) != 1:
+        return facts
+    facts.release_version = release_version_from_cluster(facts.clusters[0])
+    if not facts.release_version:
+        return facts
+    facts.release_cr = _get_release_cr(api, release_cr_name(provider, facts.release_version))
+    if facts.release_cr is None:
+        return facts
+    repository = f"{RELEASE_CHART_REPOSITORY_PREFIX}/{release_chart_name(provider)}"
+    try:
+        facts.published = oci_tag_exists(RELEASE_CHART_REGISTRY_HOST, repository, facts.release_version)
+    except RegistryError as e:
+        raise FetchError(str(e)) from e
+    return facts
 
 
 def _fetch_dependency_helm_releases(api, app: dict, namespace: str) -> dict:

@@ -31,6 +31,7 @@ _APP_DICT = {
         "catalog": "giantswarm",
         "catalogNamespace": "giantswarm",
     },
+    "status": {"release": {"status": "deployed"}, "version": "1.2.3"},
 }
 
 _CATALOG_DICT = {
@@ -1146,3 +1147,245 @@ class TestOverrideRegistryUrlFlag:
             result = self._run(self._args())
         assert "oci://gsoci.azurecr.io/charts/giantswarm/my-app" in result.output
         assert "Registry host overridden" not in result.output
+
+
+_CLUSTER_APP = {
+    "apiVersion": "application.giantswarm.io/v1alpha1",
+    "kind": "App",
+    "metadata": {"name": "mycluster", "namespace": "org-acme"},
+    "spec": {
+        "name": "cluster-aws",
+        "namespace": "org-acme",
+        "version": "7.2.5",
+        "catalog": "cluster",
+        "kubeConfig": {"inCluster": True},
+    },
+    "status": {"release": {"status": "deployed"}, "version": "7.2.5"},
+}
+
+_CLUSTER_APP_FLUX = {
+    **_CLUSTER_APP,
+    "metadata": {**_CLUSTER_APP["metadata"], "labels": {
+        "kustomize.toolkit.fluxcd.io/name": "flux",
+        "kustomize.toolkit.fluxcd.io/namespace": "flux-giantswarm",
+    }},
+}
+
+_CLUSTER_CATALOG = {
+    "metadata": {"name": "cluster", "namespace": "giantswarm"},
+    "spec": {"repositories": [{"type": "oci", "URL": "oci://gsoci.azurecr.io/charts/giantswarm/"}]},
+}
+
+
+def _release_facts(**overrides):
+    from fetcher import ReleaseChartFacts
+    values = dict(
+        provider="aws",
+        clusters=[{"metadata": {"name": "mycluster",
+                                "labels": {"release.giantswarm.io/version": "34.0.0"}}}],
+        release_version="34.0.0",
+        release_cr={"spec": {"components": [{"name": "cluster-aws", "version": "7.2.5"}]}},
+        published=True,
+    )
+    values.update(overrides)
+    return ReleaseChartFacts(**values)
+
+
+def _cluster_fetch_result(app=_CLUSTER_APP, **facts):
+    return FetchResult(app=app, catalog=_CLUSTER_CATALOG, release_chart=_release_facts(**facts))
+
+
+
+def _leftover():
+    from migrator.release_values import ValuesSource
+    return ValuesSource("ConfigMap", "mycluster-userconfig", "org-acme", "values")
+
+
+class TestReleaseChartSubstitution:
+    def _run(self, args=None, input_text=None):
+        return CliRunner().invoke(cli, ["migrate", "--name", "mycluster", "--namespace", "org-acme"]
+                                  + (args or []), input=input_text)
+
+    def test_notice_printed(self):
+        with patch("fetcher.fetch", return_value=_cluster_fetch_result()):
+            result = self._run(["--dry-run"])
+        assert result.exit_code == 0
+        assert ("ℹ️  Release chart substitution: cluster-aws@7.2.5 → release-aws@34.0.0 "
+                "(Release CR aws-34.0.0)") in result.output
+
+    def test_generated_resources_use_release_chart(self):
+        with patch("fetcher.fetch", return_value=_cluster_fetch_result()):
+            result = self._run(["--dry-run"])
+        assert "url: oci://gsoci.azurecr.io/charts/giantswarm/release-aws" in result.output
+        assert "tag: 34.0.0" in result.output
+        assert "cluster-aws" not in result.output.split("Generated Flux resources")[1]
+
+    def test_names_are_untouched(self):
+        with patch("fetcher.fetch", return_value=_cluster_fetch_result()):
+            result = self._run(["--dry-run"])
+        generated = result.output.split("Generated Flux resources")[1]
+        assert "name: mycluster" in generated
+        assert "releaseName: mycluster" in generated
+
+    def test_ordinary_app_has_no_notice(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = CliRunner().invoke(cli, ["migrate", "--name", "my-app", "--namespace", "giantswarm",
+                                              "--dry-run"])
+        assert "Release chart substitution" not in result.output
+
+    def test_release_chart_error_stops_before_conversion(self):
+        with patch("fetcher.fetch", return_value=_cluster_fetch_result(published=False)):
+            result = self._run(["--dry-run"])
+        assert result.exit_code == 1
+        assert "release-aws:34.0.0 not found" in result.output
+        assert "Generated Flux resources" not in result.output
+
+    def test_flux_managed_cleanup_message_mentions_release_version(self):
+        mock_api = MagicMock()
+        mock_api.get_namespaced_custom_object.return_value = {
+            "metadata": {"annotations": {}, "finalizers": []},
+            "status": {"conditions": [{"type": "Ready", "status": "True", "reason": "InstallSucceeded"}]},
+        }
+        with patch("fetcher.fetch", return_value=_cluster_fetch_result(app=_CLUSTER_APP_FLUX)), \
+             patch("migrator.load_client", return_value=mock_api), \
+             patch("migrator.apply_flux_resources.DynamicClient"), \
+             patch("migrator.monitor_helm_release.time.sleep"):
+            result = self._run(input_text="y\n")
+        assert result.exit_code == 0
+        assert "also remove global.release.version" in result.output
+
+    def _non_flux_run(self, input_text, leftovers=None, find_error=None, remove_error=None):
+        mock_api = MagicMock()
+        mock_api.get_namespaced_custom_object.return_value = {
+            "metadata": {"annotations": {}, "finalizers": []},
+            "status": {"conditions": [{"type": "Ready", "status": "True", "reason": "InstallSucceeded"}]},
+        }
+        find = MagicMock(side_effect=find_error, return_value=[_leftover()] if leftovers is None else leftovers)
+        with patch("fetcher.fetch", return_value=_cluster_fetch_result()), \
+             patch("migrator.load_client", return_value=mock_api), \
+             patch("migrator.core_client") as core_client, \
+             patch("migrator.apply_flux_resources.DynamicClient"), \
+             patch("migrator.monitor_helm_release.time.sleep"), \
+             patch("main.find_release_version_sources", find), \
+             patch("main.remove_release_version", side_effect=remove_error) as remove, \
+             patch("main.delete_app_and_chart", return_value=[]) as delete:
+            result = self._run(input_text=input_text)
+        return result, find, remove, delete, core_client
+
+    def test_non_flux_offers_removal_and_deletes(self):
+        result, find, remove, delete, core_client = self._non_flux_run("y\ny\n")
+        assert result.exit_code == 0
+        assert "Will remove global.release.version from ConfigMap org-acme/mycluster-userconfig" in result.output
+        assert "Remove global.release.version and delete App CR and Chart CR?" in result.output
+        assert find.call_args.args[1]["kind"] == "HelmRelease"
+        remove.assert_called_once_with(core_client.return_value, _leftover())
+        assert "✅ Removed global.release.version from ConfigMap org-acme/mycluster-userconfig" in result.output
+        delete.assert_called_once()
+
+    def test_non_flux_decline_removes_nothing(self):
+        result, _, remove, delete, _ = self._non_flux_run("y\nn\n")
+        assert result.exit_code == 0
+        remove.assert_not_called()
+        delete.assert_not_called()
+
+    def test_non_flux_without_leftovers_uses_plain_prompt(self):
+        result, _, remove, delete, _ = self._non_flux_run("y\ny\n", leftovers=[])
+        assert "Delete App CR and Chart CR?" in result.output
+        assert "Will remove" not in result.output
+        remove.assert_not_called()
+        delete.assert_called_once()
+
+    def test_non_flux_find_error_exits_nonzero(self):
+        result, _, _, delete, _ = self._non_flux_run("y\n", find_error=MigratorError("cannot read cm"))
+        assert result.exit_code == 1
+        assert "❌ cannot read cm" in result.output
+        delete.assert_not_called()
+
+    def test_non_flux_remove_error_exits_before_delete(self):
+        result, _, _, delete, _ = self._non_flux_run("y\ny\n", remove_error=MigratorError("patch failed"))
+        assert result.exit_code == 1
+        assert "❌ patch failed" in result.output
+        delete.assert_not_called()
+
+
+class TestIgnoreAppStatusFlag:
+    _FAILED_APP = {**_APP_DICT, "status": {"release": {"status": "failed"}, "version": "1.2.3"}}
+
+    def _run(self, extra=()):
+        with patch("fetcher.fetch", return_value=_fetch_result(app=self._FAILED_APP)):
+            return CliRunner().invoke(cli, ["migrate", "--name", "my-app", "--namespace", "giantswarm",
+                                            "--dry-run", *extra])
+
+    def test_undeployed_app_is_rejected(self):
+        result = self._run()
+        assert result.exit_code == 1
+        assert '❌ App CR is not deployed (release status "failed"' in result.output
+        assert "Generated Flux resources" not in result.output
+
+    def test_flag_migrates_with_warning(self):
+        result = self._run(["--ignore-app-status"])
+        assert result.exit_code == 0
+        assert "⚠️  App CR is not deployed" in result.output
+        assert "Generated Flux resources" in result.output
+
+
+class TestCleanupReleaseVersion:
+    def _run(self, app, args=(), input_text=None, leftovers=None, find_error=None):
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = app
+        find = MagicMock(side_effect=find_error, return_value=[_leftover()] if leftovers is None else leftovers)
+        with patch("migrator.load_client", return_value=api), \
+             patch("migrator.core_client") as core_client, \
+             patch("main.verify_migration", return_value=[]), \
+             patch("main.get_helm_release", return_value={"kind": "HelmRelease"}) as get_hr, \
+             patch("main.find_release_version_sources", find), \
+             patch("main.remove_release_version") as remove, \
+             patch("main.delete_app_and_chart", return_value=[]) as delete:
+            result = CliRunner().invoke(
+                cli, ["cleanup", "--name", "mycluster", "--namespace", "org-acme", *args], input=input_text)
+        return result, find, remove, delete, get_hr, core_client
+
+    def test_ordinary_app_is_not_checked(self):
+        result, find, _, _, _, _ = self._run(_APP_DICT, ["--dry-run"])
+        assert result.exit_code == 0
+        find.assert_not_called()
+
+    def test_flux_managed_leftover_fails_verification(self):
+        result, _, remove, delete, _, _ = self._run(_CLUSTER_APP_FLUX, ["-y"])
+        assert result.exit_code == 1
+        assert ("❌ ConfigMap org-acme/mycluster-userconfig (key values) still sets global.release.version — "
+                "remove it from your gitops repository") in result.output
+        remove.assert_not_called()
+        delete.assert_not_called()
+
+    def test_flux_managed_without_leftovers_proceeds(self):
+        result, find, remove, delete, get_hr, core_client = self._run(_CLUSTER_APP_FLUX, ["-y"], leftovers=[])
+        assert result.exit_code == 0
+        find.assert_called_once_with(core_client.return_value, get_hr.return_value)
+        remove.assert_not_called()
+        delete.assert_called_once()
+
+    def test_find_error_fails_verification(self):
+        result, _, _, delete, _, _ = self._run(_CLUSTER_APP, ["-y"], find_error=MigratorError("forbidden"))
+        assert result.exit_code == 1
+        assert "❌ forbidden" in result.output
+        delete.assert_not_called()
+
+    def test_non_flux_dry_run_announces_without_removing(self):
+        result, _, remove, delete, _, _ = self._run(_CLUSTER_APP, ["--dry-run"])
+        assert result.exit_code == 0
+        assert "Will remove global.release.version from ConfigMap org-acme/mycluster-userconfig" in result.output
+        remove.assert_not_called()
+        delete.assert_not_called()
+
+    def test_non_flux_assume_yes_removes_then_deletes(self):
+        result, _, remove, delete, _, core_client = self._run(_CLUSTER_APP, ["-y"])
+        assert result.exit_code == 0
+        remove.assert_called_once_with(core_client.return_value, _leftover())
+        delete.assert_called_once()
+
+    def test_non_flux_prompt_mentions_removal(self):
+        result, _, remove, delete, _, _ = self._run(_CLUSTER_APP, input_text="n\n")
+        assert "Remove global.release.version and delete App CR and Chart CR?" in result.output
+        remove.assert_not_called()
+        delete.assert_not_called()

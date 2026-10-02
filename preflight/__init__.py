@@ -1,5 +1,14 @@
 from converter import catalog_has_oci
-from converter.resources import helm_url_from_catalog
+from converter.release_chart import (
+    RELEASE_CHART_REGISTRY_HOST,
+    RELEASE_CHART_REPOSITORY_PREFIX,
+    RELEASE_VERSION_LABEL,
+    cluster_chart_name,
+    pinned_cluster_chart_version,
+    release_chart_name,
+    release_cr_name,
+)
+from converter.resources import helm_url_from_catalog, release_name
 from converter.values_from import is_psp_removal_patch
 
 
@@ -199,6 +208,83 @@ def check_registry_override(app: dict, catalog: dict, registry_override: str | N
     return []
 
 
+def check_app_status(app: dict, catalog: dict, ignore_app_status: bool = False) -> list[PreflightIssue]:
+    status = app.get("status") or {}
+    release_status = (status.get("release") or {}).get("status")
+    deployed_version = status.get("version")
+    wanted_version = (app.get("spec") or {}).get("version")
+    if release_status == "deployed" and deployed_version == wanted_version:
+        return []
+    detail = (
+        f'release status "{release_status or "<unset>"}", '
+        f'status.version "{deployed_version or "<unset>"}", spec.version "{wanted_version or "<unset>"}"'
+    )
+    if ignore_app_status:
+        return [PreflightWarning(f"App CR is not deployed ({detail}); migrating anyway (--ignore-app-status)")]
+    return [PreflightError(
+        f"App CR is not deployed ({detail}); only an App CR whose release status is deployed and whose "
+        "status.version equals spec.version can be migrated. Fix the app first, or pass "
+        "--ignore-app-status to migrate it regardless"
+    )]
+
+
+def check_release_chart(app: dict, catalog: dict, release_chart) -> list[PreflightIssue]:
+    if release_chart is None:
+        return []
+    provider = release_chart.provider
+    chart = cluster_chart_name(provider)
+    issues = []
+    if not catalog_has_oci(catalog):
+        catalog_name = (catalog.get("metadata") or {}).get("name", "")
+        issues.append(PreflightError(
+            f'{chart} is a Cluster chart and is only migrated as {release_chart_name(provider)} from an '
+            f'OCI repository, but Catalog "{catalog_name}" has none'
+        ))
+    issues += _release_chart_resolution_errors(app, release_chart)
+    return issues
+
+
+def _release_chart_resolution_errors(app: dict, release_chart) -> list[PreflightIssue]:
+    provider = release_chart.provider
+    target_ns = app["spec"]["namespace"]
+    selector = f"app.kubernetes.io/instance={release_name(app)}"
+    if not release_chart.clusters:
+        return [PreflightError(
+            f'no Cluster labelled {selector} found in namespace "{target_ns}"; '
+            "cannot determine the release version for the Release chart"
+        )]
+    if len(release_chart.clusters) > 1:
+        names = ", ".join(sorted(c["metadata"]["name"] for c in release_chart.clusters))
+        return [PreflightError(
+            f'{len(release_chart.clusters)} Clusters labelled {selector} found in namespace "{target_ns}" '
+            f"({names}); expected exactly one"
+        )]
+    cluster_name = release_chart.clusters[0]["metadata"]["name"]
+    if not release_chart.release_version:
+        return [PreflightError(
+            f'Cluster "{cluster_name}" has no {RELEASE_VERSION_LABEL} label; '
+            "cannot determine the release version for the Release chart"
+        )]
+    release = release_cr_name(provider, release_chart.release_version)
+    if release_chart.release_cr is None:
+        return [PreflightError(f'Release CR "{release}" not found (named by Cluster "{cluster_name}")')]
+    chart = cluster_chart_name(provider)
+    pinned = pinned_cluster_chart_version(release_chart.release_cr, provider)
+    wanted = app["spec"].get("version")
+    if pinned != wanted:
+        return [PreflightError(
+            f'Release CR "{release}" pins {chart} {pinned or "<none>"} but the App CR\'s spec.version is '
+            f"{wanted}; this needs an operator to reconcile by hand before migrating"
+        )]
+    if not release_chart.published:
+        return [PreflightError(
+            f"{release_chart_name(provider)}:{release_chart.release_version} not found in "
+            f"{RELEASE_CHART_REGISTRY_HOST}/{RELEASE_CHART_REPOSITORY_PREFIX}; "
+            f"there is no Release chart for Release CR \"{release}\""
+        )]
+    return []
+
+
 _CHECKS = [
     check_kube_config,
     check_namespace_config,
@@ -224,13 +310,17 @@ def run_preflight(
     pull_secret_name: str | None = None,
     pull_secret: dict | None = None,
     registry_override: str | None = None,
+    ignore_app_status: bool = False,
+    release_chart=None,
 ) -> list[PreflightIssue]:
     refs = referenced_configs or {}
     deps = dependency_helm_releases or {}
     return (
-        [issue for check in _CHECKS for issue in check(app, catalog)]
+        check_app_status(app, catalog, ignore_app_status)
+        + [issue for check in _CHECKS for issue in check(app, catalog)]
         + [issue for check in _REFS_CHECKS for issue in check(app, catalog, refs)]
         + check_dependency_helm_releases(app, catalog, deps)
         + check_pull_secret(app, catalog, pull_secret_name, pull_secret)
         + check_registry_override(app, catalog, registry_override)
+        + check_release_chart(app, catalog, release_chart)
     )
