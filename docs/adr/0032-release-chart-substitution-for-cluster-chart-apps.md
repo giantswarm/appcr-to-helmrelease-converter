@@ -78,6 +78,15 @@ Anything more risks Flux not adopting the existing Helm release, which for a
 workload cluster is a disaster. `--override-registry-url` still applies to the
 URL as for any app.
 
+The one exception is the chart-name labels, which are metadata on the Flux
+resources and play no part in Helm adoption. app-admission-controller's
+`mutateLabels` sets `app.kubernetes.io/name: <spec.name>` on every App CR that
+carries neither it nor the legacy `app` label, so a Cluster chart App CR reads
+`app.kubernetes.io/name: cluster-aws`. Copied as-is, the label would name a
+chart the HelmRelease no longer deploys. When `app.kubernetes.io/name` or `app`
+equals the Cluster chart name, it becomes the Release chart name
+(`release-aws`); any other value was set on purpose and is kept.
+
 **Installation values.** Cluster chart App CRs take the installation-wide
 `cluster-app-installation-values` ConfigMap from the `giantswarm` namespace
 through `extraConfigs` (priority 10). Flux reads `valuesFrom` only from the

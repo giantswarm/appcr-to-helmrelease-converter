@@ -54,10 +54,19 @@ def pinned_cluster_chart_version(release_cr: dict, provider: str) -> str | None:
     return None
 
 
+# app-admission-controller sets app.kubernetes.io/name to spec.name on every
+# App CR that has neither label — see ADR 0032.
+_CHART_NAME_LABELS = ("app.kubernetes.io/name", "app")
+
+
 def substitute_release_chart(app: dict, provider: str, release_version: str) -> dict:
     app = deepcopy(app)
     app["spec"]["name"] = release_chart_name(provider)
     app["spec"]["version"] = release_version
+    labels = (app.get("metadata") or {}).get("labels") or {}
+    for key in _CHART_NAME_LABELS:
+        if labels.get(key) == cluster_chart_name(provider):
+            labels[key] = release_chart_name(provider)
     return app
 
 

@@ -193,7 +193,7 @@ If the App CR carries `app-operator.giantswarm.io/depends-on`, the converted Hel
 
 ### Cluster chart apps
 
-An App CR for a Cluster chart — `spec.name` of `cluster-aws`, `cluster-azure`, `cluster-vsphere`, `cluster-cloud-director`, `cluster-eks`, `cluster-proxmox` or `cluster-aks` — is always converted to its **Release chart**, `release-<provider>`, at the release version, instead of the Cluster chart itself (see [the retagging workflow](https://github.com/giantswarm/releases/blob/master/docs/workflows-retagging-cluster-charts.md) and ADR 0032). Only the chart name and the tag change; every name, namespace and values source stays as for any other app, so Flux adopts the existing Helm release.
+An App CR for a Cluster chart — `spec.name` of `cluster-aws`, `cluster-azure`, `cluster-vsphere`, `cluster-cloud-director`, `cluster-eks`, `cluster-proxmox` or `cluster-aks` — is always converted to its **Release chart**, `release-<provider>`, at the release version, instead of the Cluster chart itself (see [the retagging workflow](https://github.com/giantswarm/releases/blob/master/docs/workflows-retagging-cluster-charts.md) and ADR 0032). Only the chart name and the tag change; every name, namespace and values source stays as for any other app, so Flux adopts the existing Helm release. The one exception is metadata: an `app.kubernetes.io/name` or `app` label whose value is the Cluster chart name — app-admission-controller sets `app.kubernetes.io/name` to the chart name on every App CR — becomes the Release chart name on the generated resources. Any other value is kept.
 
 Preflight resolves the Release chart and stops with an error when any step fails:
 

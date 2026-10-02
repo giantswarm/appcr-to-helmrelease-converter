@@ -177,3 +177,42 @@ class TestInstallationValues:
         hr = convert(localize_installation_values(app), _CATALOG)[1]
         assert [e["name"] for e in hr["spec"]["valuesFrom"]] == ["cluster-app-installation-values", "user-values"]
         assert "namespace" not in hr["spec"]["valuesFrom"][0]
+
+
+class TestSubstituteReleaseChartLabels:
+    def _labelled(self, **labels):
+        app = _app()
+        app["metadata"]["labels"] = labels
+        return app
+
+    def test_renames_webhook_set_name_label(self):
+        result = substitute_release_chart(self._labelled(**{"app.kubernetes.io/name": "cluster-aws"}), "aws", "34.0.0")
+        assert result["metadata"]["labels"]["app.kubernetes.io/name"] == "release-aws"
+
+    def test_renames_legacy_app_label(self):
+        result = substitute_release_chart(self._labelled(app="cluster-aws"), "aws", "34.0.0")
+        assert result["metadata"]["labels"]["app"] == "release-aws"
+
+    def test_keeps_deliberately_set_value(self):
+        app = self._labelled(**{"app.kubernetes.io/name": "my-cluster", "app": "something"})
+        result = substitute_release_chart(app, "aws", "34.0.0")
+        assert result["metadata"]["labels"] == {"app.kubernetes.io/name": "my-cluster", "app": "something"}
+
+    def test_leaves_other_labels_alone(self):
+        app = self._labelled(**{"app.kubernetes.io/name": "cluster-aws", "foo": "cluster-aws"})
+        result = substitute_release_chart(app, "aws", "34.0.0")
+        assert result["metadata"]["labels"]["foo"] == "cluster-aws"
+
+    def test_does_not_mutate_input_labels(self):
+        app = self._labelled(**{"app.kubernetes.io/name": "cluster-aws"})
+        substitute_release_chart(app, "aws", "34.0.0")
+        assert app["metadata"]["labels"]["app.kubernetes.io/name"] == "cluster-aws"
+
+    def test_without_labels(self):
+        result = substitute_release_chart(_app(), "aws", "34.0.0")
+        assert "labels" not in result["metadata"]
+
+    def test_renamed_label_reaches_both_generated_resources(self):
+        app = self._labelled(**{"app.kubernetes.io/name": "cluster-aws"})
+        docs = convert(substitute_release_chart(app, "aws", "34.0.0"), _CATALOG)
+        assert [d["metadata"]["labels"]["app.kubernetes.io/name"] for d in docs] == ["release-aws", "release-aws"]

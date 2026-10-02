@@ -129,7 +129,7 @@ The installation-wide `cluster-app-installation-values` ConfigMap that **Cluster
 _Avoid_: installation ConfigMap, cluster values
 
 **Release chart substitution**:
-The **Conversion** special case that, for an **App CR** whose chart is a **Cluster chart**, emits the **Release chart** in its place. Only the chart name and version change; every other part of the converted resources stays identical to an ordinary **Conversion**, so Flux adopts the existing Helm release.
+The **Conversion** special case that, for an **App CR** whose chart is a **Cluster chart**, emits the **Release chart** in its place. Only the chart name and version change — plus a chart-name label (`app.kubernetes.io/name` or `app`) whose value is the **Cluster chart** name, which follows the chart; every other part of the converted resources stays identical to an ordinary **Conversion**, so Flux adopts the existing Helm release.
 _Avoid_: chart swap, cluster special case
 
 ## Relationships
