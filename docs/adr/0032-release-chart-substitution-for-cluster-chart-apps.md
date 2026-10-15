@@ -81,7 +81,9 @@ Catalog CR's own OCI URL must be that same registry and path, compared without
 scheme, case or trailing slashes; anything else is a hard preflight error.
 Otherwise the generated OCIRepository would point at a chart the tool never
 verified. A mirror stays possible through `--override-registry-url`, which
-rewrites the URL after this check.
+rewrites the URL after this check. In practice this never fires: Cluster
+charts only ever come from GSOCI, since no customer builds their own Cluster
+or Release charts. It is kept as a cheap fail-safe in case that changes.
 
 **What changes in the output.** Only the chart name and version: the
 OCIRepository URL ends in `release-<provider>` and its `ref.tag` is the Release
