@@ -67,6 +67,28 @@ def _release_block(values: dict) -> dict | None:
     return release if isinstance(release, dict) else None
 
 
+def find_release_version_in_helm_release(helm_release: dict) -> list[str]:
+    """Places on the HelmRelease itself that set the value, which only an edit of
+    the HelmRelease can remove. The converter emits neither; they appear when
+    someone edits the HelmRelease after the migration."""
+    meta = helm_release.get("metadata") or {}
+    ref = f"HelmRelease {meta.get('namespace', '')}/{meta.get('name', '')}"
+    spec = helm_release.get("spec") or {}
+    found = []
+    inline = spec.get("values")
+    release = _release_block(inline) if isinstance(inline, dict) else None
+    if release is not None and "version" in release:
+        found.append(f"{ref}: spec.values sets {RELEASE_VERSION_VALUE}")
+    for entry in spec.get("valuesFrom") or []:
+        if entry.get("targetPath") == RELEASE_VERSION_VALUE:
+            kind = entry.get("kind", "ConfigMap")
+            found.append(
+                f"{ref}: valuesFrom entry {kind} {entry.get('name', '')} sets {RELEASE_VERSION_VALUE} "
+                f"through targetPath"
+            )
+    return found
+
+
 def find_release_version_sources(core_api: client.CoreV1Api, helm_release: dict) -> list[ValuesSource]:
     namespace = (helm_release.get("metadata") or {}).get("namespace", "")
     found = []

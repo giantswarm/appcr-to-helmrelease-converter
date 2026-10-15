@@ -50,7 +50,10 @@ labelled `app.kubernetes.io/instance=<Helm release name>`, read for its
 from `global.release.version`, so it describes what was last deployed. Zero or
 several matching Clusters, or a missing label, is a hard preflight error. The
 Cluster list tries `cluster.x-k8s.io/v1beta2` first and falls back to `v1beta1`
-when the newer version is not served.
+when the newer version is not served. A leading `v` on the label value is
+stripped, as app-admission-controller does with `global.release.version`; the
+chart itself already writes the label without one, so in practice the value is
+used as-is.
 
 **Consistency.** The Release CR `<provider>-<version>` must exist, and the
 Cluster chart version it pins in `spec.components[]` must equal the App CR's
@@ -64,11 +67,21 @@ regardless of `--override-registry-url`. The question is whether a Release
 chart exists for this Cluster chart version, and only the upstream registry
 answers it. Whether a mirror has synced it is the same open question as for
 any other app on a mirrored installation, and gets no special treatment. A
-check that cannot complete is a hard error. This is the first time the tool
-talks to a registry; it replaces any release-version cutoff. The lookup is a
-`HEAD` on the manifest through the OCI distribution API with an anonymous
-bearer token, using the standard library and the same `certifi` CA bundle the
-kubernetes client verifies against.
+check that cannot complete is a hard error. It is recorded during the fetch and
+reported by preflight next to every other finding, so a registry outage does
+not hide the rest. This is the first time the tool talks to a registry; it
+replaces any release-version cutoff. The lookup is a `HEAD` on the manifest
+through the OCI distribution API with an anonymous bearer token, accepting an
+OCI image manifest, an OCI image index or a Docker v2 manifest, using the
+standard library and the same `certifi` CA bundle the kubernetes client
+verifies against.
+
+Because the check looks only at `gsoci.azurecr.io/charts/giantswarm`, the
+Catalog CR's own OCI URL must be that same registry and path, compared without
+scheme, case or trailing slashes; anything else is a hard preflight error.
+Otherwise the generated OCIRepository would point at a chart the tool never
+verified. A mirror stays possible through `--override-registry-url`, which
+rewrites the URL after this check.
 
 **What changes in the output.** Only the chart name and version: the
 OCIRepository URL ends in `release-<provider>` and its `ref.tag` is the Release
@@ -123,7 +136,17 @@ behind the HelmRelease's `valuesFrom` may still carry it. For a non-Flux-managed
 app there is no repository to edit: `cleanup`, and `migrate`'s own clean-up for
 such apps, offers to remove the key from the live resource, in the same `y/N`
 prompt as the App CR and Chart CR deletion. The YAML under that key is
-rewritten, so its comments are lost.
+rewritten, so its comments are lost. `cleanup --assume-yes` confirms that prompt
+too, so it writes to the user's ConfigMaps and Secrets without asking — the
+same as it already deletes the App CR and Chart CR without asking.
+
+`cleanup` also reads the live HelmRelease itself: an inline `spec.values`
+setting the value, or a `valuesFrom` entry with
+`targetPath: global.release.version`, is a hard failure for every app, Flux or
+not. The converter emits neither; they appear only when someone edits the
+HelmRelease after the migration, and only an edit of the HelmRelease removes
+them, so the tool names them and does not attempt it. Any other `targetPath`
+sets a single string value, so it cannot hide a nested `version` key.
 
 ## Considered options
 

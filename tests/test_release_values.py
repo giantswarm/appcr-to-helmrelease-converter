@@ -8,6 +8,7 @@ from kubernetes.client.exceptions import ApiException
 from migrator import MigratorError
 from migrator.release_values import (
     ValuesSource,
+    find_release_version_in_helm_release,
     find_release_version_sources,
     get_helm_release,
     remove_release_version,
@@ -190,3 +191,43 @@ class TestRemoveReleaseVersion:
 
 def test_values_source_str():
     assert str(ValuesSource("ConfigMap", "cm", "ns", "values")) == "ConfigMap ns/cm (key values)"
+
+
+class TestFindReleaseVersionInHelmRelease:
+    def _hr(self, values=None, values_from=()):
+        spec = {"valuesFrom": list(values_from)}
+        if values is not None:
+            spec["values"] = values
+        return {"metadata": {"name": "mycluster", "namespace": "org-acme"}, "spec": spec}
+
+    def test_inline_values(self):
+        found = find_release_version_in_helm_release(self._hr(values={"global": {"release": {"version": "34.0.0"}}}))
+        assert found == ["HelmRelease org-acme/mycluster: spec.values sets global.release.version"]
+
+    def test_inline_values_without_version(self):
+        assert find_release_version_in_helm_release(self._hr(values={"global": {"release": {}}})) == []
+
+    def test_inline_values_not_a_mapping(self):
+        assert find_release_version_in_helm_release(self._hr(values="oops")) == []
+
+    def test_target_path_entry(self):
+        found = find_release_version_in_helm_release(self._hr(values_from=[
+            {"kind": "Secret", "name": "pin", "valuesKey": "v", "targetPath": "global.release.version"},
+        ]))
+        assert found == [
+            "HelmRelease org-acme/mycluster: valuesFrom entry Secret pin sets global.release.version through targetPath"
+        ]
+
+    def test_target_path_kind_defaults_to_configmap(self):
+        found = find_release_version_in_helm_release(self._hr(values_from=[
+            {"name": "pin", "targetPath": "global.release.version"},
+        ]))
+        assert "ConfigMap pin" in found[0]
+
+    def test_other_target_path_is_ignored(self):
+        assert find_release_version_in_helm_release(self._hr(values_from=[
+            {"name": "x", "targetPath": "global.release"}, {"name": "y"},
+        ])) == []
+
+    def test_empty_helm_release(self):
+        assert find_release_version_in_helm_release({}) == []

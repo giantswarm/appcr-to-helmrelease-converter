@@ -38,6 +38,7 @@ class ReleaseChartFacts:
     release_version: str | None = None
     release_cr: dict | None = None
     published: bool | None = None
+    registry_error: str | None = None
 
 
 @dataclass
@@ -171,7 +172,8 @@ def _fetch_release_chart_facts(api, app: dict, provider: str) -> ReleaseChartFac
     try:
         facts.published = oci_tag_exists(RELEASE_CHART_REGISTRY_HOST, repository, facts.release_version)
     except RegistryError as e:
-        raise FetchError(str(e)) from e
+        # Reported by preflight, next to every other finding.
+        facts.registry_error = str(e)
     return facts
 
 

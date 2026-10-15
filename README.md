@@ -118,7 +118,9 @@ Phase two of the migration: run once the converted resources have been committed
 6. _(Flux-managed App CRs only)_ The App CR has Flux reconciliation disabled — proof Flux won't recreate it once deleted
 7. _(Flux-managed Cluster chart apps only)_ No live ConfigMap or Secret behind the HelmRelease's `valuesFrom` still sets `global.release.version` — remove it from your gitops repository alongside the App CR
 
-For a non-Flux-managed Cluster chart app, check 7 becomes an action instead: the deletion prompt also removes `global.release.version` from the live values sources (`-y` confirms it, `--dry-run` only lists them). The YAML under that key is rewritten, so its comments are lost.
+For a non-Flux-managed Cluster chart app, check 7 becomes an action instead: the deletion prompt also removes `global.release.version` from the live values sources, and `--dry-run` only lists them. **`-y` confirms that removal too, so `cleanup -y` writes to your ConfigMaps and Secrets without asking.** The YAML under that key is rewritten, so its comments are lost.
+
+For every Cluster chart app, Flux-managed or not, `cleanup` also fails when the live HelmRelease itself sets `global.release.version`, either inline in `spec.values` or through a `valuesFrom` entry with `targetPath: global.release.version`. The converter never emits either, so they come from editing the HelmRelease after migrating. Remove them from the HelmRelease (in your gitops repository if Flux manages it) and re-run.
 
 If any check fails, `cleanup` reports every failure and exits non-zero without deleting anything.
 
@@ -199,8 +201,8 @@ Preflight resolves the Release chart and stops with an error when any step fails
 
 1. The workload cluster's CAPI Cluster — the one labelled `app.kubernetes.io/instance=<release name>` in the app's target namespace — gives the release version from its `release.giantswarm.io/version` label.
 2. The Release CR `<provider>-<version>` must exist and pin the App CR's own `spec.version` for the Cluster chart.
-3. `release-<provider>:<version>` must be published in public `gsoci.azurecr.io/charts/giantswarm` — checked there regardless of `--override-registry-url`, which still applies to the generated URL.
-4. The Catalog CR must have an OCI repository.
+3. `release-<provider>:<version>` must be published in public `gsoci.azurecr.io/charts/giantswarm` — checked there regardless of `--override-registry-url`, which still applies to the generated URL. If the registry can't be reached, that is reported as a preflight error alongside any other finding.
+4. The Catalog CR must have an OCI repository, and it must be `gsoci.azurecr.io/charts/giantswarm` — the registry the check in step 3 looks at. For a mirror, use `--override-registry-url`.
 
 The installation-wide `cluster-app-installation-values` ConfigMap, which Cluster chart App CRs take from `giantswarm` through `extraConfigs`, is read from the copy Kyverno keeps in the app's own `org-*` namespace, and emitted as a same-namespace `valuesFrom` entry — Flux cannot read values across namespaces. The copy must exist.
 

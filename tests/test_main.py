@@ -1330,14 +1330,14 @@ class TestIgnoreAppStatusFlag:
 
 
 class TestCleanupReleaseVersion:
-    def _run(self, app, args=(), input_text=None, leftovers=None, find_error=None):
+    def _run(self, app, args=(), input_text=None, leftovers=None, find_error=None, helm_release=None):
         api = MagicMock()
         api.get_namespaced_custom_object.return_value = app
         find = MagicMock(side_effect=find_error, return_value=[_leftover()] if leftovers is None else leftovers)
         with patch("migrator.load_client", return_value=api), \
              patch("migrator.core_client") as core_client, \
              patch("main.verify_migration", return_value=[]), \
-             patch("main.get_helm_release", return_value={"kind": "HelmRelease"}) as get_hr, \
+             patch("main.get_helm_release", return_value=helm_release or {"kind": "HelmRelease"}) as get_hr, \
              patch("main.find_release_version_sources", find), \
              patch("main.remove_release_version") as remove, \
              patch("main.delete_app_and_chart", return_value=[]) as delete:
@@ -1384,6 +1384,17 @@ class TestCleanupReleaseVersion:
         remove.assert_called_once_with(core_client.return_value, _leftover())
         delete.assert_called_once()
 
+    def test_value_set_on_helm_release_fails_for_any_app(self):
+        hr = {"metadata": {"name": "mycluster", "namespace": "org-acme"},
+              "spec": {"values": {"global": {"release": {"version": "34.0.0"}}}}}
+        for app in (_CLUSTER_APP, _CLUSTER_APP_FLUX):
+            result, _, remove, delete, _, _ = self._run(app, ["-y"], leftovers=[], helm_release=hr)
+            assert result.exit_code == 1
+            assert ("❌ HelmRelease org-acme/mycluster: spec.values sets global.release.version — "
+                    "remove it from the HelmRelease") in result.output
+            remove.assert_not_called()
+            delete.assert_not_called()
+
     def test_non_flux_prompt_mentions_removal(self):
         result, _, remove, delete, _, _ = self._run(_CLUSTER_APP, input_text="n\n")
         assert "Remove global.release.version and delete App CR and Chart CR?" in result.output
@@ -1414,6 +1425,16 @@ class TestInstallationValuesLocalized:
                                        .split("✅")[0].split("\n", 1)[1])
         hr = [d for d in generated if d and d.get("kind") == "HelmRelease"][0]
         assert hr["spec"]["valuesFrom"] == [{"kind": "ConfigMap", "name": "cluster-app-installation-values"}]
+
+    def test_org_copy_with_other_key_keeps_that_key(self):
+        refs = {("ConfigMap", "cluster-app-installation-values", "org-acme"): {"data": {"values": "a: b"}}}
+        result = self._run(self._app(), refs)
+        generated = yaml.safe_load_all(result.output.split("Generated Flux resources")[1]
+                                       .split("✅")[0].split("\n", 1)[1])
+        hr = [d for d in generated if d and d.get("kind") == "HelmRelease"][0]
+        assert hr["spec"]["valuesFrom"] == [
+            {"kind": "ConfigMap", "name": "cluster-app-installation-values", "valuesKey": "values"}
+        ]
 
     def test_missing_org_copy_is_preflight_error(self):
         refs = {("ConfigMap", "cluster-app-installation-values", "org-acme"): None}

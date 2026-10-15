@@ -61,7 +61,7 @@ class TestOciTagExists:
         assert result is False
 
     def test_rejected_token_is_error(self):
-        with pytest.raises(RegistryError, match="HTTP 401"):
+        with pytest.raises(RegistryError, match="rejected its own anonymous pull token"):
             _lookup(_http_error(401, _CHALLENGE), _ok({"token": "tok"}), _http_error(401, _CHALLENGE))
 
     def test_server_error_is_error(self):
@@ -93,6 +93,27 @@ class TestOciTagExists:
     def test_token_response_without_token_is_error(self):
         with pytest.raises(RegistryError, match="carries no token"):
             _lookup(_http_error(401, _CHALLENGE), _ok({}))
+
+    def test_read_timeout_is_error(self):
+        with pytest.raises(RegistryError, match="TimeoutError"):
+            _lookup(TimeoutError("The read operation timed out"))
+
+    def test_connection_reset_is_error(self):
+        with pytest.raises(RegistryError, match="ConnectionResetError"):
+            _lookup(ConnectionResetError(54, "Connection reset by peer"))
+
+    def test_truncated_response_is_error(self):
+        import http.client
+        with pytest.raises(RegistryError, match="RemoteDisconnected"):
+            _lookup(http.client.RemoteDisconnected("Remote end closed connection"))
+
+    def test_token_endpoint_timeout_is_error(self):
+        with pytest.raises(RegistryError, match="anonymous registry token"):
+            _lookup(_http_error(401, _CHALLENGE), TimeoutError("timed out"))
+
+    def test_accepts_image_index(self):
+        _, urlopen = _lookup(_ok())
+        assert "application/vnd.oci.image.index.v1+json" in urlopen.call_args_list[0].args[0].get_header("Accept")
 
     def test_verifies_tls_with_certifi_bundle(self):
         with patch("certifi.where", return_value="/bundle.pem") as where, \

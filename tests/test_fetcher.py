@@ -595,14 +595,15 @@ class TestFetchReleaseChartFacts:
         result, _ = self._fetch(self._api(), published=False)
         assert result.release_chart.published is False
 
-    def test_registry_error_is_fetch_error(self):
+    def test_registry_error_is_kept_for_preflight(self):
         from fetcher.registry import RegistryError
         with patch("kubernetes.config.load_kube_config"), \
              patch("kubernetes.client.CustomObjectsApi", return_value=self._api()), \
              patch("kubernetes.client.CoreV1Api"), \
              patch("fetcher.oci_tag_exists", side_effect=RegistryError("registry down")):
-            with pytest.raises(FetchError, match="registry down"):
-                fetch("mycluster", "org-acme")
+            result = fetch("mycluster", "org-acme")
+        assert result.release_chart.registry_error == "registry down"
+        assert result.release_chart.published is None
 
 
 class TestFetchInstallationValuesLocalized:

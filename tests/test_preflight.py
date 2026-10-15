@@ -600,36 +600,36 @@ class TestCheckAppStatus:
         return {"spec": {"version": wanted}, "status": status}
 
     def test_deployed_app_passes(self):
-        assert check_app_status(self._app(), _EMPTY_CATALOG) == []
+        assert check_app_status(self._app()) == []
 
     def test_failed_release_is_error(self):
-        issues = check_app_status(self._app(release_status="failed"), _EMPTY_CATALOG)
+        issues = check_app_status(self._app(release_status="failed"))
         assert len(issues) == 1
         assert isinstance(issues[0], PreflightError)
         assert 'release status "failed"' in str(issues[0])
         assert "--ignore-app-status" in str(issues[0])
 
     def test_version_mismatch_is_error(self):
-        issues = check_app_status(self._app(deployed="1.2.2"), _EMPTY_CATALOG)
+        issues = check_app_status(self._app(deployed="1.2.2"))
         assert isinstance(issues[0], PreflightError)
         assert 'status.version "1.2.2"' in str(issues[0])
         assert 'spec.version "1.2.3"' in str(issues[0])
 
     def test_missing_status_is_error(self):
-        issues = check_app_status({"spec": {}}, _EMPTY_CATALOG)
+        issues = check_app_status({"spec": {}})
         assert isinstance(issues[0], PreflightError)
         assert 'release status "<unset>"' in str(issues[0])
         assert 'status.version "<unset>"' in str(issues[0])
         assert 'spec.version "<unset>"' in str(issues[0])
 
     def test_ignore_turns_error_into_warning(self):
-        issues = check_app_status(self._app(release_status="failed"), _EMPTY_CATALOG, ignore_app_status=True)
+        issues = check_app_status(self._app(release_status="failed"), ignore_app_status=True)
         assert len(issues) == 1
         assert isinstance(issues[0], PreflightWarning)
         assert 'release status "failed"' in str(issues[0])
 
     def test_ignore_on_deployed_app_is_silent(self):
-        assert check_app_status(self._app(), _EMPTY_CATALOG, ignore_app_status=True) == []
+        assert check_app_status(self._app(), ignore_app_status=True) == []
 
     def test_surfaced_by_run_preflight(self):
         issues = run_preflight(self._app(release_status="pending-upgrade"), _CATALOG_OCI)
@@ -728,3 +728,37 @@ class TestCheckReleaseChart:
     def test_surfaced_by_run_preflight(self):
         issues = run_preflight(_deployed(_CLUSTER_APP), _CLUSTER_CATALOG, release_chart=_facts(published=False))
         assert any(isinstance(i, PreflightError) and "release-aws:34.0.0" in str(i) for i in issues)
+
+
+class TestCheckReleaseChartRegistry:
+    def _errors(self, facts, catalog=_CLUSTER_CATALOG):
+        return [str(i) for i in check_release_chart(_CLUSTER_APP, catalog, facts)]
+
+    def test_registry_error_is_reported_in_preflight(self):
+        errors = self._errors(_facts(published=None, registry_error="failed to look up x: timed out"))
+        assert errors == [
+            "could not verify that release-aws:34.0.0 is published: failed to look up x: timed out"
+        ]
+
+    def test_catalog_pointing_elsewhere_is_error(self):
+        catalog = {"metadata": {"name": "cluster"},
+                   "spec": {"repositories": [{"type": "oci", "URL": "oci://other.azurecr.io/charts/giantswarm"}]}}
+        errors = self._errors(_facts(), catalog)
+        assert len(errors) == 1
+        assert 'Catalog "cluster" points at oci://other.azurecr.io/charts/giantswarm' in errors[0]
+        assert "gsoci.azurecr.io/charts/giantswarm" in errors[0]
+
+    def test_catalog_with_other_path_is_error(self):
+        catalog = {"metadata": {"name": "cluster"},
+                   "spec": {"repositories": [{"type": "oci", "URL": "oci://gsoci.azurecr.io/cluster-catalog"}]}}
+        assert len(self._errors(_facts(), catalog)) == 1
+
+    def test_catalog_url_compared_without_scheme_case_or_slashes(self):
+        catalog = {"metadata": {"name": "cluster"},
+                   "spec": {"repositories": [{"type": "oci", "URL": "OCI://GSOCI.azurecr.io/charts/giantswarm//"}]}}
+        assert self._errors(_facts(), catalog) == []
+
+    def test_storage_fallback_url_is_checked(self):
+        catalog = {"metadata": {"name": "cluster"},
+                   "spec": {"storage": {"type": "oci", "URL": "oci://gsoci.azurecr.io/charts/giantswarm/"}}}
+        assert self._errors(_facts(), catalog) == []

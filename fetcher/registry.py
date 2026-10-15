@@ -1,3 +1,4 @@
+import http.client
 import json
 import re
 import ssl
@@ -9,8 +10,12 @@ import certifi
 
 _MANIFEST_ACCEPT = ", ".join((
     "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.oci.image.index.v1+json",
     "application/vnd.docker.distribution.manifest.v2+json",
 ))
+# urllib raises more than URLError: a read timeout is a bare TimeoutError, a
+# reset connection an OSError, a truncated response an HTTPException.
+_TRANSPORT_ERRORS = (OSError, http.client.HTTPException)
 _TIMEOUT_S = 15
 
 
@@ -36,7 +41,7 @@ def _anonymous_token(challenge: str) -> str:
     try:
         with urllib.request.urlopen(url, timeout=_TIMEOUT_S, context=_ssl_context()) as resp:
             body = json.load(resp)
-    except (urllib.error.URLError, ValueError) as e:
+    except (*_TRANSPORT_ERRORS, ValueError) as e:
         raise RegistryError(f"failed to get an anonymous registry token from {realm}: {e}") from e
     token = body.get("token") or body.get("access_token")
     if not token:
@@ -62,9 +67,15 @@ def _manifest_exists(url: str, ref: str, token: str | None) -> bool:
             return False
         if e.code == 401 and token is None:
             raise _Unauthorized(e.headers.get("WWW-Authenticate", "")) from e
+        if e.code == 401:
+            raise RegistryError(
+                f"failed to look up {ref}: the registry rejected its own anonymous pull token (HTTP 401)"
+            ) from e
         raise RegistryError(f"failed to look up {ref}: HTTP {e.code}") from e
     except urllib.error.URLError as e:
         raise RegistryError(f"failed to look up {ref}: {e.reason}") from e
+    except _TRANSPORT_ERRORS as e:
+        raise RegistryError(f"failed to look up {ref}: {e!r}") from e
 
 
 def oci_tag_exists(host: str, repository: str, tag: str) -> bool:

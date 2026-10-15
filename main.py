@@ -27,6 +27,7 @@ from fetcher import FetchError
 from migrator.cleanup import delete_app_and_chart, flux_cleanup_message, verify_migration
 from migrator.release_values import (
     RELEASE_VERSION_VALUE,
+    find_release_version_in_helm_release,
     find_release_version_sources,
     get_helm_release,
     remove_release_version,
@@ -433,9 +434,16 @@ def cleanup_cmd(name, namespace, context, dry_run, assume_yes):
     leftovers = []
     if not failures and cluster_chart_provider(app):
         try:
-            leftovers = find_release_version_sources(migrator.core_client(), get_helm_release(api, app))
+            helm_release = get_helm_release(api, app)
+            leftovers = find_release_version_sources(migrator.core_client(), helm_release)
         except migrator.MigratorError as e:
             failures.append(str(e))
+        else:
+            failures += [
+                f"{finding} — remove it from the HelmRelease (in your gitops repository if Flux manages "
+                f"it), then re-run"
+                for finding in find_release_version_in_helm_release(helm_release)
+            ]
         if leftovers and migrator.is_flux_managed(app):
             failures += [
                 f"{source} still sets {RELEASE_VERSION_VALUE} — remove it from your gitops repository, "

@@ -8,7 +8,7 @@ from converter.release_chart import (
     release_chart_name,
     release_cr_name,
 )
-from converter.resources import helm_url_from_catalog, release_name
+from converter.resources import helm_url_from_catalog, oci_url_from_catalog, release_name
 from converter.values_from import is_psp_removal_patch
 
 
@@ -208,7 +208,7 @@ def check_registry_override(app: dict, catalog: dict, registry_override: str | N
     return []
 
 
-def check_app_status(app: dict, catalog: dict, ignore_app_status: bool = False) -> list[PreflightIssue]:
+def check_app_status(app: dict, ignore_app_status: bool = False) -> list[PreflightIssue]:
     status = app.get("status") or {}
     release_status = (status.get("release") or {}).get("status")
     deployed_version = status.get("version")
@@ -234,14 +234,28 @@ def check_release_chart(app: dict, catalog: dict, release_chart) -> list[Preflig
     provider = release_chart.provider
     chart = cluster_chart_name(provider)
     issues = []
+    catalog_name = (catalog.get("metadata") or {}).get("name", "")
     if not catalog_has_oci(catalog):
-        catalog_name = (catalog.get("metadata") or {}).get("name", "")
         issues.append(PreflightError(
             f'{chart} is a Cluster chart and is only migrated as {release_chart_name(provider)} from an '
             f'OCI repository, but Catalog "{catalog_name}" has none'
         ))
+    elif _registry_location(oci_url_from_catalog(catalog)) != _CHECKED_REGISTRY:
+        issues.append(PreflightError(
+            f'Catalog "{catalog_name}" points at {oci_url_from_catalog(catalog)}, but the Release chart is '
+            f"only checked in {_CHECKED_REGISTRY}; the generated OCIRepository would point at a chart this "
+            "tool never verified. Use --override-registry-url for a mirror of that registry instead"
+        ))
     issues += _release_chart_resolution_errors(app, release_chart)
     return issues
+
+
+_CHECKED_REGISTRY = f"{RELEASE_CHART_REGISTRY_HOST}/{RELEASE_CHART_REPOSITORY_PREFIX}"
+
+
+def _registry_location(url: str) -> str:
+    rest = url.split("://", 1)[-1]
+    return rest.strip("/").lower()
 
 
 def _release_chart_resolution_errors(app: dict, release_chart) -> list[PreflightIssue]:
@@ -275,6 +289,11 @@ def _release_chart_resolution_errors(app: dict, release_chart) -> list[Preflight
         return [PreflightError(
             f'Release CR "{release}" pins {chart} {pinned or "<none>"} but the App CR\'s spec.version is '
             f"{wanted}; this needs an operator to reconcile by hand before migrating"
+        )]
+    if release_chart.registry_error:
+        return [PreflightError(
+            f"could not verify that {release_chart_name(provider)}:{release_chart.release_version} is "
+            f"published: {release_chart.registry_error}"
         )]
     if not release_chart.published:
         return [PreflightError(
@@ -316,7 +335,7 @@ def run_preflight(
     refs = referenced_configs or {}
     deps = dependency_helm_releases or {}
     return (
-        check_app_status(app, catalog, ignore_app_status)
+        check_app_status(app, ignore_app_status)
         + [issue for check in _CHECKS for issue in check(app, catalog)]
         + [issue for check in _REFS_CHECKS for issue in check(app, catalog, refs)]
         + check_dependency_helm_releases(app, catalog, deps)
