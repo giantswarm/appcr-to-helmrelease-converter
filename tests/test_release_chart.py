@@ -1,0 +1,218 @@
+import pytest
+
+from converter import convert
+from converter.release_chart import (
+    CLUSTER_CHART_PROVIDERS,
+    cluster_chart_name,
+    cluster_chart_provider,
+    has_installation_values,
+    localize_installation_values,
+    pinned_cluster_chart_version,
+    release_chart_name,
+    release_cr_name,
+    release_version_from_cluster,
+    substitute_release_chart,
+)
+
+
+def _app(chart="cluster-aws", version="7.2.5"):
+    return {
+        "metadata": {"name": "mycluster", "namespace": "org-acme"},
+        "spec": {"name": chart, "namespace": "org-acme", "version": version, "catalog": "cluster"},
+    }
+
+
+_CATALOG = {"spec": {"repositories": [{"type": "oci", "URL": "oci://gsoci.azurecr.io/charts/giantswarm/"}]}}
+
+
+class TestClusterChartProvider:
+    @pytest.mark.parametrize("provider", CLUSTER_CHART_PROVIDERS)
+    def test_known_providers_qualify(self, provider):
+        assert cluster_chart_provider(_app(chart=f"cluster-{provider}")) == provider
+
+    def test_lookalike_chart_does_not_qualify(self):
+        assert cluster_chart_provider(_app(chart="cluster-autoscaler")) is None
+
+    def test_bare_cluster_chart_does_not_qualify(self):
+        assert cluster_chart_provider(_app(chart="cluster")) is None
+
+    def test_ordinary_chart_does_not_qualify(self):
+        assert cluster_chart_provider(_app(chart="loki")) is None
+
+    def test_release_chart_does_not_qualify(self):
+        assert cluster_chart_provider(_app(chart="release-aws")) is None
+
+    def test_missing_spec_does_not_qualify(self):
+        assert cluster_chart_provider({}) is None
+
+    def test_metadata_name_is_ignored(self):
+        app = _app(chart="loki")
+        app["metadata"]["name"] = "cluster-aws"
+        assert cluster_chart_provider(app) is None
+
+
+class TestNames:
+    def test_cluster_chart_name(self):
+        assert cluster_chart_name("cloud-director") == "cluster-cloud-director"
+
+    def test_release_chart_name(self):
+        assert release_chart_name("cloud-director") == "release-cloud-director"
+
+    def test_release_cr_name(self):
+        assert release_cr_name("aws", "34.0.0") == "aws-34.0.0"
+
+
+class TestReleaseVersionFromCluster:
+    def test_reads_label(self):
+        cluster = {"metadata": {"labels": {"release.giantswarm.io/version": "34.0.0"}}}
+        assert release_version_from_cluster(cluster) == "34.0.0"
+
+    def test_strips_leading_v(self):
+        cluster = {"metadata": {"labels": {"release.giantswarm.io/version": "v34.0.0"}}}
+        assert release_version_from_cluster(cluster) == "34.0.0"
+
+    def test_missing_label_is_none(self):
+        assert release_version_from_cluster({"metadata": {"labels": {}}}) is None
+
+    def test_missing_metadata_is_none(self):
+        assert release_version_from_cluster({}) is None
+
+
+class TestPinnedClusterChartVersion:
+    def test_reads_matching_component(self):
+        release = {"spec": {"components": [
+            {"name": "flatcar", "version": "4459.2.2"},
+            {"name": "cluster-aws", "catalog": "cluster", "version": "7.2.5"},
+        ]}}
+        assert pinned_cluster_chart_version(release, "aws") == "7.2.5"
+
+    def test_ignores_apps(self):
+        release = {"spec": {"apps": [{"name": "cluster-aws", "version": "1.0.0"}], "components": []}}
+        assert pinned_cluster_chart_version(release, "aws") is None
+
+    def test_missing_spec_is_none(self):
+        assert pinned_cluster_chart_version({}, "aws") is None
+
+
+class TestSubstituteReleaseChart:
+    def test_replaces_chart_name_and_version(self):
+        result = substitute_release_chart(_app(), "aws", "34.0.0")
+        assert result["spec"]["name"] == "release-aws"
+        assert result["spec"]["version"] == "34.0.0"
+
+    def test_leaves_everything_else_untouched(self):
+        app = _app()
+        result = substitute_release_chart(app, "aws", "34.0.0")
+        assert result["metadata"] == app["metadata"]
+        assert {k: v for k, v in result["spec"].items() if k not in ("name", "version")} == \
+            {k: v for k, v in app["spec"].items() if k not in ("name", "version")}
+
+    def test_does_not_mutate_input(self):
+        app = _app()
+        substitute_release_chart(app, "aws", "34.0.0")
+        assert app["spec"]["name"] == "cluster-aws"
+        assert app["spec"]["version"] == "7.2.5"
+
+    def test_converted_resources_differ_only_in_chart_and_tag(self):
+        app = _app()
+        plain = convert(app, _CATALOG)
+        substituted = convert(substitute_release_chart(app, "aws", "34.0.0"), _CATALOG)
+        assert substituted[0]["spec"]["url"] == "oci://gsoci.azurecr.io/charts/giantswarm/release-aws"
+        assert substituted[0]["spec"]["ref"]["tag"] == "34.0.0"
+        plain[0]["spec"]["url"] = substituted[0]["spec"]["url"]
+        plain[0]["spec"]["ref"]["tag"] = "34.0.0"
+        assert plain == substituted
+
+
+_INSTALLATION_ENTRY = {"kind": "configMap", "name": "cluster-app-installation-values",
+                       "namespace": "giantswarm", "priority": 10}
+
+
+def _app_with(*extra_configs):
+    app = _app()
+    app["spec"]["extraConfigs"] = [dict(e) for e in extra_configs]
+    return app
+
+
+class TestInstallationValues:
+    def test_detected(self):
+        assert has_installation_values(_app_with(_INSTALLATION_ENTRY))
+
+    def test_not_detected_without_extra_configs(self):
+        assert not has_installation_values(_app())
+
+    def test_not_detected_in_other_namespace(self):
+        assert not has_installation_values(_app_with({**_INSTALLATION_ENTRY, "namespace": "org-acme"}))
+
+    def test_not_detected_for_secret(self):
+        assert not has_installation_values(_app_with({**_INSTALLATION_ENTRY, "kind": "secret"}))
+
+    def test_not_detected_for_other_name(self):
+        assert not has_installation_values(_app_with({**_INSTALLATION_ENTRY, "name": "other"}))
+
+    def test_kind_defaults_to_configmap(self):
+        entry = {k: v for k, v in _INSTALLATION_ENTRY.items() if k != "kind"}
+        assert has_installation_values(_app_with(entry))
+
+    def test_localize_moves_entry_to_app_namespace(self):
+        other = {"kind": "configMap", "name": "other", "namespace": "giantswarm"}
+        result = localize_installation_values(_app_with(_INSTALLATION_ENTRY, other))
+        assert result["spec"]["extraConfigs"] == [
+            {**_INSTALLATION_ENTRY, "namespace": "org-acme"},
+            other,
+        ]
+
+    def test_localize_does_not_mutate_input(self):
+        app = _app_with(_INSTALLATION_ENTRY)
+        localize_installation_values(app)
+        assert app["spec"]["extraConfigs"][0]["namespace"] == "giantswarm"
+
+    def test_localize_without_extra_configs_is_copy(self):
+        app = _app()
+        assert localize_installation_values(app) == app
+
+    def test_localized_entry_converts_to_same_namespace_reference_first(self):
+        app = _app_with(_INSTALLATION_ENTRY)
+        app["spec"]["userConfig"] = {"configMap": {"name": "user-values", "namespace": "org-acme"}}
+        hr = convert(localize_installation_values(app), _CATALOG)[1]
+        assert [e["name"] for e in hr["spec"]["valuesFrom"]] == ["cluster-app-installation-values", "user-values"]
+        assert "namespace" not in hr["spec"]["valuesFrom"][0]
+
+
+class TestSubstituteReleaseChartLabels:
+    def _labelled(self, **labels):
+        app = _app()
+        app["metadata"]["labels"] = labels
+        return app
+
+    def test_renames_webhook_set_name_label(self):
+        result = substitute_release_chart(self._labelled(**{"app.kubernetes.io/name": "cluster-aws"}), "aws", "34.0.0")
+        assert result["metadata"]["labels"]["app.kubernetes.io/name"] == "release-aws"
+
+    def test_renames_legacy_app_label(self):
+        result = substitute_release_chart(self._labelled(app="cluster-aws"), "aws", "34.0.0")
+        assert result["metadata"]["labels"]["app"] == "release-aws"
+
+    def test_keeps_deliberately_set_value(self):
+        app = self._labelled(**{"app.kubernetes.io/name": "my-cluster", "app": "something"})
+        result = substitute_release_chart(app, "aws", "34.0.0")
+        assert result["metadata"]["labels"] == {"app.kubernetes.io/name": "my-cluster", "app": "something"}
+
+    def test_leaves_other_labels_alone(self):
+        app = self._labelled(**{"app.kubernetes.io/name": "cluster-aws", "foo": "cluster-aws"})
+        result = substitute_release_chart(app, "aws", "34.0.0")
+        assert result["metadata"]["labels"]["foo"] == "cluster-aws"
+
+    def test_does_not_mutate_input_labels(self):
+        app = self._labelled(**{"app.kubernetes.io/name": "cluster-aws"})
+        substitute_release_chart(app, "aws", "34.0.0")
+        assert app["metadata"]["labels"]["app.kubernetes.io/name"] == "cluster-aws"
+
+    def test_without_labels(self):
+        result = substitute_release_chart(_app(), "aws", "34.0.0")
+        assert "labels" not in result["metadata"]
+
+    def test_renamed_label_reaches_both_generated_resources(self):
+        app = self._labelled(**{"app.kubernetes.io/name": "cluster-aws"})
+        docs = convert(substitute_release_chart(app, "aws", "34.0.0"), _CATALOG)
+        assert [d["metadata"]["labels"]["app.kubernetes.io/name"] for d in docs] == ["release-aws", "release-aws"]

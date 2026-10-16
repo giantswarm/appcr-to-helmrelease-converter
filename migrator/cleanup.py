@@ -3,6 +3,8 @@ import time
 from kubernetes import client
 from kubernetes.client.exceptions import ApiException
 
+from converter.release_chart import cluster_chart_provider
+
 from . import (
     MigratorError,
     _APP_PAUSED_ANNOTATION,
@@ -107,6 +109,16 @@ def flux_cleanup_message(app: dict, context: str | None = None) -> str:
     else:
         chart_cr_header = f"  # Remove finalizer {_CHART_FINALIZER} and delete Chart CR:"
 
+    if cluster_chart_provider(app):
+        values_note = (
+            f"This is a Cluster chart app: in the same gitops change, also remove "
+            f"global.release.version from its values — the Release chart carries it, and a value left "
+            f"in a ConfigMap or Secret overrides it on the next upgrade. `cleanup` refuses to run while "
+            f"a live values source still sets it.\n\n"
+        )
+    else:
+        values_note = ""
+
     return (
         f"Migration complete. This app is managed by Flux, so the App CR and Chart CR must not be "
         f"deleted until gitops has adopted the generated resources — deleting them beforehand would "
@@ -114,6 +126,7 @@ def flux_cleanup_message(app: dict, context: str | None = None) -> str:
         f"resources to your gitops repository and remove the App CR from it, let Flux reconcile, then "
         f"run:\n\n"
         f"  {cleanup_cmd}\n\n"
+        f"{values_note}"
         f"That command verifies the HelmRelease is ready and adopted by gitops before deleting "
         f"anything. If it is unavailable, here is the manual fallback:\n\n"
         f"{chart_cr_header}\n"

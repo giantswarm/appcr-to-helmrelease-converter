@@ -51,7 +51,7 @@ def override_catalog_registry(catalog: dict, host: str) -> dict:
     return catalog
 
 
-def _oci_url_from_catalog(catalog: dict) -> str:
+def oci_url_from_catalog(catalog: dict) -> str:
     for repo in (catalog.get("spec") or {}).get("repositories") or []:
         if repo.get("type") == "oci":
             return repo["URL"]
@@ -90,7 +90,7 @@ def build_oci_repository(app: dict, catalog: dict, pull_secret: str | None = Non
     version = app["spec"].get("version")
     if not version:
         raise ValueError("spec.version is required but empty")
-    url_base = _oci_url_from_catalog(catalog)
+    url_base = oci_url_from_catalog(catalog)
     url = f"{url_base.rstrip('/')}/{app['spec']['name']}"
     spec = OrderedDict([
         ("interval", "10m"),
