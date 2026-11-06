@@ -7,6 +7,7 @@ from converter.release_chart import (
     cluster_chart_provider,
     has_installation_values,
     localize_installation_values,
+    PREVENT_DELETION_LABEL,
     pinned_cluster_chart_version,
     release_chart_name,
     release_cr_name,
@@ -103,7 +104,7 @@ class TestSubstituteReleaseChart:
     def test_leaves_everything_else_untouched(self):
         app = _app()
         result = substitute_release_chart(app, "aws", "34.0.0")
-        assert result["metadata"] == app["metadata"]
+        assert result["metadata"] == {**app["metadata"], "labels": {PREVENT_DELETION_LABEL: "true"}}
         assert {k: v for k, v in result["spec"].items() if k not in ("name", "version")} == \
             {k: v for k, v in app["spec"].items() if k not in ("name", "version")}
 
@@ -121,6 +122,8 @@ class TestSubstituteReleaseChart:
         assert substituted[0]["spec"]["ref"]["tag"] == "34.0.0"
         plain[0]["spec"]["url"] = substituted[0]["spec"]["url"]
         plain[0]["spec"]["ref"]["tag"] = "34.0.0"
+        for doc in plain:
+            doc["metadata"]["labels"] = {PREVENT_DELETION_LABEL: "true"}
         assert plain == substituted
 
 
@@ -196,7 +199,9 @@ class TestSubstituteReleaseChartLabels:
     def test_keeps_deliberately_set_value(self):
         app = self._labelled(**{"app.kubernetes.io/name": "my-cluster", "app": "something"})
         result = substitute_release_chart(app, "aws", "34.0.0")
-        assert result["metadata"]["labels"] == {"app.kubernetes.io/name": "my-cluster", "app": "something"}
+        assert result["metadata"]["labels"] == {
+            "app.kubernetes.io/name": "my-cluster", "app": "something", PREVENT_DELETION_LABEL: "true",
+        }
 
     def test_leaves_other_labels_alone(self):
         app = self._labelled(**{"app.kubernetes.io/name": "cluster-aws", "foo": "cluster-aws"})
@@ -208,9 +213,23 @@ class TestSubstituteReleaseChartLabels:
         substitute_release_chart(app, "aws", "34.0.0")
         assert app["metadata"]["labels"]["app.kubernetes.io/name"] == "cluster-aws"
 
-    def test_without_labels(self):
+    def test_without_labels_adds_prevent_deletion(self):
         result = substitute_release_chart(_app(), "aws", "34.0.0")
-        assert "labels" not in result["metadata"]
+        assert result["metadata"]["labels"] == {PREVENT_DELETION_LABEL: "true"}
+
+    def test_keeps_existing_prevent_deletion_value(self):
+        result = substitute_release_chart(self._labelled(**{PREVENT_DELETION_LABEL: "yes"}), "aws", "34.0.0")
+        assert result["metadata"]["labels"] == {PREVENT_DELETION_LABEL: "yes"}
+
+    def test_does_not_mutate_input_without_labels(self):
+        app = _app()
+        substitute_release_chart(app, "aws", "34.0.0")
+        assert "labels" not in app["metadata"]
+
+    def test_prevent_deletion_reaches_both_generated_resources(self):
+        docs = convert(substitute_release_chart(_app(), "aws", "34.0.0"), _CATALOG)
+        assert [d["kind"] for d in docs] == ["OCIRepository", "HelmRelease"]
+        assert [d["metadata"]["labels"][PREVENT_DELETION_LABEL] for d in docs] == ["true", "true"]
 
     def test_renamed_label_reaches_both_generated_resources(self):
         app = self._labelled(**{"app.kubernetes.io/name": "cluster-aws"})

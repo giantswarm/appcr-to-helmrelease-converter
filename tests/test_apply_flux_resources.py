@@ -136,18 +136,43 @@ class TestApplyFluxResources:
         api.get_namespaced_custom_object.side_effect = ApiException(status=404)
         step = ApplyFluxResources(api, _DOCS_OCI)
         step.revert()
-        suspend_call = api.patch_namespaced_custom_object.call_args
+        suspend_call = api.patch_namespaced_custom_object.call_args_list[0]
+        assert suspend_call.kwargs["plural"] == "helmreleases"
         assert suspend_call.kwargs["body"]["spec"]["suspend"] is True
-        assert api.patch_namespaced_custom_object.call_count == 1
         delete_call = api.delete_namespaced_custom_object.call_args_list[0]
         assert delete_call.kwargs["plural"] == "helmreleases"
+
+    def test_revert_removes_prevent_deletion_label_before_each_delete(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        calls = []
+        api.patch_namespaced_custom_object.side_effect = lambda **kw: calls.append(("patch", kw))
+        api.delete_namespaced_custom_object.side_effect = lambda **kw: calls.append(("delete", kw))
+        ApplyFluxResources(api, _DOCS_OCI).revert()
+        assert [(op, kw["plural"]) for op, kw in calls] == [
+            ("patch", "helmreleases"), ("delete", "helmreleases"),
+            ("patch", "ocirepositories"), ("delete", "ocirepositories"),
+        ]
+        for op, kw in calls:
+            if op == "patch":
+                assert kw["body"]["metadata"]["labels"] == {"giantswarm.io/prevent-deletion": None}
+
+    def test_apply_removes_prevent_deletion_label_before_source_cleanup(self):
+        api = MagicMock()
+        with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn_cls.return_value.request.side_effect = [None, ApiException(status=500)]
+            with pytest.raises(MigratorError):
+                ApplyFluxResources(api, _DOCS_OCI).apply()
+        patch_call = api.patch_namespaced_custom_object.call_args
+        assert patch_call.kwargs["plural"] == "ocirepositories"
+        assert patch_call.kwargs["body"] == {"metadata": {"labels": {"giantswarm.io/prevent-deletion": None}}}
 
     def test_revert_suspend_uses_merge_patch_not_ssa(self):
         api = MagicMock()
         api.get_namespaced_custom_object.side_effect = ApiException(status=404)
         step = ApplyFluxResources(api, _DOCS_OCI)
         step.revert()
-        suspend_call = api.patch_namespaced_custom_object.call_args
+        suspend_call = api.patch_namespaced_custom_object.call_args_list[0]
         assert "force" not in suspend_call.kwargs
         assert "force_conflicts" not in suspend_call.kwargs
 

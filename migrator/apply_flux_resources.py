@@ -4,6 +4,8 @@ from kubernetes import client
 from kubernetes.client.exceptions import ApiException
 from kubernetes.dynamic import DynamicClient
 
+from converter.release_chart import PREVENT_DELETION_LABEL
+
 from . import MigrationStep, MigratorError, _api_message, _HR_GROUP, _HR_VERSION, _HR_PLURAL, _POLL_INTERVAL_S, _POLL_TIMEOUT_S
 
 _SOURCE_META = {
@@ -11,6 +13,8 @@ _SOURCE_META = {
     "HelmRepository": ("source.toolkit.fluxcd.io", "v1", "helmrepositories"),
 }
 _FIELD_MANAGER = "appcr-to-helmrelease-converter"
+# Merge-patch body that removes the label Kyverno uses to deny deletion — see ADR 0034.
+_UNPROTECT = {"metadata": {"labels": {PREVENT_DELETION_LABEL: None}}}
 
 
 class ApplyFluxResources(MigrationStep):
@@ -56,10 +60,21 @@ class ApplyFluxResources(MigrationStep):
         name = meta.get("name", "")
         namespace = meta.get("namespace", "")
         group, version, plural = self._gvp(kind)
+        self._unprotect(group, version, namespace, plural, name)
         try:
             self._api.delete_namespaced_custom_object(
                 group=group, version=version, namespace=namespace, plural=plural,
                 name=name,
+            )
+        except ApiException:
+            pass
+
+    def _unprotect(self, group: str, version: str, namespace: str, plural: str, name: str) -> None:
+        # Best effort: if it fails, the delete that follows reports the real error.
+        try:
+            self._api.patch_namespaced_custom_object(
+                group=group, version=version, namespace=namespace, plural=plural,
+                name=name, body=_UNPROTECT,
             )
         except ApiException:
             pass
@@ -80,11 +95,12 @@ class ApplyFluxResources(MigrationStep):
         src_kind = self._source.get("kind", "")
         src_group, src_version, src_plural = self._gvp(src_kind)
 
-        # 1. Suspend HelmRelease via merge-patch so helm-controller stops reconciling
+        # 1. Suspend HelmRelease via merge-patch so helm-controller stops reconciling,
+        #    and drop the prevent-deletion label so Kyverno lets the delete through
         try:
             self._api.patch_namespaced_custom_object(
                 group=_HR_GROUP, version=_HR_VERSION, namespace=hr_ns, plural=_HR_PLURAL,
-                name=hr_name, body={"spec": {"suspend": True}},
+                name=hr_name, body={**_UNPROTECT, "spec": {"suspend": True}},
             )
         except ApiException as e:
             errors.append(MigratorError(f"failed to suspend HelmRelease {hr_ns}/{hr_name}: {_api_message(e)}"))
@@ -120,6 +136,7 @@ class ApplyFluxResources(MigrationStep):
 
         # 3. Delete source only once HelmRelease is confirmed gone
         if hr_confirmed_deleted:
+            self._unprotect(src_group, src_version, src_ns, src_plural, src_name)
             try:
                 self._api.delete_namespaced_custom_object(
                     group=src_group, version=src_version, namespace=src_ns, plural=src_plural,
