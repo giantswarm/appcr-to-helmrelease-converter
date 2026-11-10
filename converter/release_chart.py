@@ -70,6 +70,20 @@ def substitute_release_chart(app: dict, provider: str, release_version: str) -> 
     return app
 
 
+# Stamped on the resources generated for a Cluster chart app: the platform's
+# Kyverno policy refuses DELETE on objects carrying it, and deleting the
+# HelmRelease of a Cluster chart uninstalls the cluster — see ADR 0034.
+PREVENT_DELETION_LABEL = "giantswarm.io/prevent-deletion"
+
+
+def protect_from_deletion(app: dict) -> dict:
+    app = deepcopy(app)
+    labels = dict(app["metadata"].get("labels") or {})
+    labels[PREVENT_DELETION_LABEL] = "true"
+    app["metadata"]["labels"] = labels
+    return app
+
+
 # Kyverno copies this ConfigMap from `giantswarm` into every org-* namespace and
 # prepends it to Cluster chart HelmReleases there — see ADR 0032.
 INSTALLATION_VALUES_CONFIGMAP = "cluster-app-installation-values"
