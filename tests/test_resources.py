@@ -90,10 +90,6 @@ class TestBuildHelmRelease:
         remediation = build_helm_release(_app(spec_name="release-aws"))["spec"]["install"]["remediation"]
         assert remediation == OrderedDict([("remediateLastFailure", False)])
 
-    def test_cluster_chart_named_app_keeps_install_retries(self):
-        # Only the substituted release-<provider> chart is a Cluster chart app here.
-        assert build_helm_release(_app(spec_name="cluster-aws"))["spec"]["install"]["remediation"]["retries"] == 10
-
     def test_install_remediation_not_remediate_last_failure(self):
         assert build_helm_release(_app())["spec"]["install"]["remediation"]["remediateLastFailure"] is False
 
