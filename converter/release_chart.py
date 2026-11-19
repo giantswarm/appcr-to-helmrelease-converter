@@ -36,6 +36,11 @@ def release_chart_name(provider: str) -> str:
     return f"release-{provider}"
 
 
+def is_release_chart_app(app: dict) -> bool:
+    chart = (app.get("spec") or {}).get("name") or ""
+    return chart in {release_chart_name(p) for p in CLUSTER_CHART_PROVIDERS}
+
+
 def release_cr_name(provider: str, release_version: str) -> str:
     return f"{provider}-{release_version}"
 

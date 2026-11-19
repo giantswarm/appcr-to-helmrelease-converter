@@ -204,7 +204,9 @@ Preflight resolves the Release chart and stops with an error when any step fails
 3. `release-<provider>:<version>` must be published in public `gsoci.azurecr.io/charts/giantswarm` — checked there regardless of `--override-registry-url`, which still applies to the generated URL. If the registry can't be reached, that is reported as a preflight error alongside any other finding.
 4. The Catalog CR must have an OCI repository, and it must be `gsoci.azurecr.io/charts/giantswarm` — the registry the check in step 3 looks at. For a mirror, use `--override-registry-url`.
 
-The generated HelmRelease and OCIRepository carry `giantswarm.io/prevent-deletion: "true"`, so the platform refuses to delete them — a reverted gitops PR or a stray `kubectl delete` cannot uninstall the cluster. To delete one on purpose, suspend the HelmRelease and remove the label first (`kubectl label <kind> <name> giantswarm.io/prevent-deletion-`); `migrate`'s own revert does this for you (ADR 0034).
+The generated HelmRelease and OCIRepository carry `giantswarm.io/prevent-deletion: "true"`, so the platform refuses to delete them — a reverted gitops PR or a stray `kubectl delete` cannot uninstall the cluster. To delete one on purpose, suspend the HelmRelease and remove the label first (`kubectl label <kind> <name> giantswarm.io/prevent-deletion-`); `migrate`'s own revert does this for you (ADR 0034). The HelmRelease also has no install retries: a retried install uninstalls the release first, which would delete the cluster (ADR 0035).
+
+`cleanup` removes the label from the App CR before deleting it, as the platform would otherwise refuse the delete. The HelmRelease and the OCIRepository keep theirs.
 
 The installation-wide `cluster-app-installation-values` ConfigMap, which Cluster chart App CRs take from `giantswarm` through `extraConfigs`, is read from the copy Kyverno keeps in the app's own `org-*` namespace, and emitted as a same-namespace `valuesFrom` entry — Flux cannot read values across namespaces. The copy must exist.
 

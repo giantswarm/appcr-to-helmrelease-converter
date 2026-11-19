@@ -3,7 +3,7 @@ import time
 from kubernetes import client
 from kubernetes.client.exceptions import ApiException
 
-from converter.release_chart import cluster_chart_provider
+from converter.release_chart import PREVENT_DELETION_LABEL, cluster_chart_provider
 
 from . import (
     MigratorError,
@@ -133,9 +133,9 @@ def flux_cleanup_message(app: dict, context: str | None = None) -> str:
         f"  kubectl patch chart -n {_CHART_NAMESPACE} {chart_name} --type=merge "
         f"-p '{{\"metadata\":{{\"finalizers\":[]}}}}'\n"
         f"  kubectl delete chart -n {_CHART_NAMESPACE} {chart_name}\n\n"
-        f"  # Remove finalizer {_APP_FINALIZER} and delete App CR:\n"
+        f"  # Remove finalizer {_APP_FINALIZER} and the {PREVENT_DELETION_LABEL} label, and delete App CR:\n"
         f"  kubectl patch app -n {namespace} {name} --type=merge "
-        f"-p '{{\"metadata\":{{\"finalizers\":[]}}}}'\n"
+        f"-p '{{\"metadata\":{{\"finalizers\":[],\"labels\":{{\"{PREVENT_DELETION_LABEL}\":null}}}}}}'\n"
         f"  kubectl delete app -n {namespace} {name}\n"
     )
 
@@ -162,10 +162,16 @@ def _remove_finalizer_and_delete(api: client.CustomObjectsApi, group: str, versi
                                   finalizer: str, live: dict) -> None:
     current = list((live.get("metadata") or {}).get("finalizers") or [])
     new_finalizers = [f for f in current if f != finalizer]
+    # The platform's Kyverno policy refuses DELETE on an object with the
+    # prevent-deletion label, as a Cluster chart App CR has; clearing an absent
+    # label is a no-op — see ADR 0035.
     try:
         api.patch_namespaced_custom_object(
             group=group, version=version, namespace=namespace, plural=plural,
-            name=name, body={"metadata": {"finalizers": new_finalizers}},
+            name=name, body={"metadata": {
+                "finalizers": new_finalizers,
+                "labels": {PREVENT_DELETION_LABEL: None},
+            }},
         )
     except ApiException as e:
         raise MigratorError(

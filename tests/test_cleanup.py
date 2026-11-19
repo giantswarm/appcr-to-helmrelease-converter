@@ -93,6 +93,10 @@ class TestFluxCleanupMessage:
         msg = flux_cleanup_message(_APP)
         assert "--context" not in msg
 
+    def test_manual_fallback_clears_prevent_deletion_label(self):
+        msg = flux_cleanup_message(_APP)
+        assert '"labels":{"giantswarm.io/prevent-deletion":null}' in msg
+
     def test_still_contains_manual_kubectl_fallback_block(self):
         msg = flux_cleanup_message(_APP)
         assert "kubectl patch chart" in msg
@@ -247,6 +251,22 @@ class TestDeleteAppAndChart:
         assert finalizer_patch is not None
         finalizers = finalizer_patch.kwargs["body"]["metadata"]["finalizers"]
         assert "operatorkit.giantswarm.io/app-operator-app" not in finalizers
+
+    def test_clears_prevent_deletion_label_before_deleting_app_cr(self):
+        app_api, chart_api = self._apis()
+        with patch("migrator.cleanup.time.sleep"):
+            delete_app_and_chart(app_api, chart_api, _APP)
+        calls = app_api.method_calls
+        patch_index = next(
+            (i for i, c in enumerate(calls)
+             if c[0] == "patch_namespaced_custom_object"
+             and "labels" in (c.kwargs.get("body") or {}).get("metadata", {})),
+            None,
+        )
+        assert patch_index is not None
+        assert calls[patch_index].kwargs["body"]["metadata"]["labels"] == {"giantswarm.io/prevent-deletion": None}
+        delete_index = next(i for i, c in enumerate(calls) if c[0] == "delete_namespaced_custom_object")
+        assert patch_index < delete_index
 
     def test_deletes_app_cr(self):
         app_api, chart_api = self._apis()
