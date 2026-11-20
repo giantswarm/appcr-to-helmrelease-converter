@@ -2,6 +2,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from urllib.parse import urlparse
 
+from converter.release_chart import is_release_chart_app
 from converter.values_from import calculate_values_from
 
 _CLUSTER_LABEL = "giantswarm.io/cluster"
@@ -174,12 +175,14 @@ def _build_helm_release_common(app: dict, resolution=None) -> OrderedDict:
     spec_items = []
     if depends_on:
         spec_items.append(("dependsOn", [{"name": n} for n in depends_on]))
+    install_remediation = OrderedDict([("remediateLastFailure", False)])
+    # A retry of a failed install uninstalls the release first, which for a
+    # Cluster chart app deletes the workload cluster — see ADR 0035.
+    if not is_release_chart_app(app):
+        install_remediation["retries"] = 10
     spec_items += [
         ("install", OrderedDict([
-            ("remediation", OrderedDict([
-                ("remediateLastFailure", False),
-                ("retries", 10),
-            ]))
+            ("remediation", install_remediation),
         ])),
         ("interval", "5m"),
         ("releaseName", release_name(app)),

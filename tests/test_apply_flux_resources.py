@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from converter.release_chart import PREVENT_DELETION_LABEL
 from migrator import ApplyFluxResources, MigratorError
 from kubernetes.client.exceptions import ApiException
 
@@ -106,6 +107,30 @@ class TestApplyFluxResources:
             assert delete_call.kwargs["plural"] == "ocirepositories"
             assert delete_call.kwargs["name"] == "my-app"
 
+    def test_apply_removes_prevent_deletion_label_before_deleting_source(self):
+        api = MagicMock()
+        calls = []
+        api.patch_namespaced_custom_object.side_effect = lambda **kw: calls.append(("patch", kw))
+        api.delete_namespaced_custom_object.side_effect = lambda **kw: calls.append(("delete", kw))
+        with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn_cls.return_value.request.side_effect = [None, ApiException(status=500)]
+            step = ApplyFluxResources(api, _DOCS_OCI)
+            with pytest.raises(MigratorError):
+                step.apply()
+        assert [op for op, _ in calls] == ["patch", "delete"]
+        assert calls[0][1]["plural"] == "ocirepositories"
+        assert calls[0][1]["body"] == {"metadata": {"labels": {PREVENT_DELETION_LABEL: None}}}
+
+    def test_apply_still_deletes_source_when_label_removal_fails(self):
+        api = MagicMock()
+        api.patch_namespaced_custom_object.side_effect = ApiException(status=500)
+        with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
+            mock_dyn_cls.return_value.request.side_effect = [None, ApiException(status=500)]
+            step = ApplyFluxResources(api, _DOCS_OCI)
+            with pytest.raises(MigratorError, match="failed to apply HelmRelease"):
+                step.apply()
+        assert api.delete_namespaced_custom_object.call_args.kwargs["plural"] == "ocirepositories"
+
     def test_apply_still_raises_when_source_cleanup_also_fails(self):
         api = MagicMock()
         with patch("migrator.apply_flux_resources.DynamicClient") as mock_dyn_cls:
@@ -136,11 +161,41 @@ class TestApplyFluxResources:
         api.get_namespaced_custom_object.side_effect = ApiException(status=404)
         step = ApplyFluxResources(api, _DOCS_OCI)
         step.revert()
-        suspend_call = api.patch_namespaced_custom_object.call_args
+        suspend_call = api.patch_namespaced_custom_object.call_args_list[0]
+        assert suspend_call.kwargs["plural"] == "helmreleases"
         assert suspend_call.kwargs["body"]["spec"]["suspend"] is True
-        assert api.patch_namespaced_custom_object.call_count == 1
         delete_call = api.delete_namespaced_custom_object.call_args_list[0]
         assert delete_call.kwargs["plural"] == "helmreleases"
+
+    def test_revert_removes_prevent_deletion_label_from_helm_release_in_suspend_patch(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        step = ApplyFluxResources(api, _DOCS_OCI)
+        step.revert()
+        body = api.patch_namespaced_custom_object.call_args_list[0].kwargs["body"]
+        assert body["metadata"]["labels"] == {PREVENT_DELETION_LABEL: None}
+
+    def test_revert_removes_prevent_deletion_label_from_source_before_deleting_it(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        calls = []
+        api.patch_namespaced_custom_object.side_effect = lambda **kw: calls.append(("patch", kw))
+        api.delete_namespaced_custom_object.side_effect = lambda **kw: calls.append(("delete", kw))
+        step = ApplyFluxResources(api, _DOCS_OCI)
+        step.revert()
+        src_calls = [(op, kw) for op, kw in calls if kw["plural"] == "ocirepositories"]
+        assert [op for op, _ in src_calls] == ["patch", "delete"]
+        assert src_calls[0][1]["body"] == {"metadata": {"labels": {PREVENT_DELETION_LABEL: None}}}
+
+    def test_revert_still_deletes_source_when_label_removal_fails(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.side_effect = ApiException(status=404)
+        api.patch_namespaced_custom_object.side_effect = [None, ApiException(status=500)]
+        step = ApplyFluxResources(api, _DOCS_OCI)
+        with pytest.raises(MigratorError, match=f"remove {PREVENT_DELETION_LABEL} label from OCIRepository"):
+            step.revert()
+        delete_calls = api.delete_namespaced_custom_object.call_args_list
+        assert [c.kwargs["plural"] for c in delete_calls] == ["helmreleases", "ocirepositories"]
 
     def test_revert_suspend_uses_merge_patch_not_ssa(self):
         api = MagicMock()

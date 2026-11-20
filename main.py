@@ -19,6 +19,7 @@ from converter.release_chart import (
     cluster_chart_provider,
     has_installation_values,
     localize_installation_values,
+    protect_from_deletion,
     release_chart_name,
     release_cr_name,
     substitute_release_chart,
@@ -346,6 +347,7 @@ def migrate_cmd(name, namespace, context, dry_run, output_file, assume_yes, valu
         click.echo(f"ℹ️  Registry host overridden to {_host_only(registry_override)}.")
     if release_chart:
         source_app = substitute_release_chart(source_app, release_chart.provider, release_chart.release_version)
+        source_app = protect_from_deletion(source_app)
     docs = convert(source_app, catalog, resolution, pull_secret)
     yaml_str = _to_yaml_str(docs)
     _dump_highlighted(yaml_str)

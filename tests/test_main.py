@@ -1227,6 +1227,19 @@ class TestReleaseChartSubstitution:
         assert "name: mycluster" in generated
         assert "releaseName: mycluster" in generated
 
+    def test_generated_resources_carry_prevent_deletion_label(self):
+        with patch("fetcher.fetch", return_value=_cluster_fetch_result()):
+            result = self._run(["--dry-run"])
+        generated = result.output.split("Generated Flux resources")[1]
+        assert generated.count("giantswarm.io/prevent-deletion: 'true'") == 2
+
+    def test_ordinary_app_has_no_prevent_deletion_label(self):
+        with patch("fetcher.fetch", return_value=_fetch_result()):
+            result = CliRunner().invoke(cli, ["migrate", "--name", "my-app", "--namespace", "giantswarm",
+                                              "--dry-run"])
+        assert result.exit_code == 0
+        assert "prevent-deletion" not in result.output
+
     def test_ordinary_app_has_no_notice(self):
         with patch("fetcher.fetch", return_value=_fetch_result()):
             result = CliRunner().invoke(cli, ["migrate", "--name", "my-app", "--namespace", "giantswarm",

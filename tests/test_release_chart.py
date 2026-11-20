@@ -6,12 +6,15 @@ from converter.release_chart import (
     cluster_chart_name,
     cluster_chart_provider,
     has_installation_values,
+    is_release_chart_app,
     localize_installation_values,
     pinned_cluster_chart_version,
     release_chart_name,
     release_cr_name,
     release_version_from_cluster,
     substitute_release_chart,
+    PREVENT_DELETION_LABEL,
+    protect_from_deletion,
 )
 
 
@@ -113,14 +116,16 @@ class TestSubstituteReleaseChart:
         assert app["spec"]["name"] == "cluster-aws"
         assert app["spec"]["version"] == "7.2.5"
 
-    def test_converted_resources_differ_only_in_chart_and_tag(self):
+    def test_converted_resources_differ_only_in_chart_tag_and_install_retries(self):
         app = _app()
         plain = convert(app, _CATALOG)
         substituted = convert(substitute_release_chart(app, "aws", "34.0.0"), _CATALOG)
         assert substituted[0]["spec"]["url"] == "oci://gsoci.azurecr.io/charts/giantswarm/release-aws"
         assert substituted[0]["spec"]["ref"]["tag"] == "34.0.0"
+        assert "retries" not in substituted[1]["spec"]["install"]["remediation"]
         plain[0]["spec"]["url"] = substituted[0]["spec"]["url"]
         plain[0]["spec"]["ref"]["tag"] = "34.0.0"
+        del plain[1]["spec"]["install"]["remediation"]["retries"]
         assert plain == substituted
 
 
@@ -216,3 +221,48 @@ class TestSubstituteReleaseChartLabels:
         app = self._labelled(**{"app.kubernetes.io/name": "cluster-aws"})
         docs = convert(substitute_release_chart(app, "aws", "34.0.0"), _CATALOG)
         assert [d["metadata"]["labels"]["app.kubernetes.io/name"] for d in docs] == ["release-aws", "release-aws"]
+
+
+class TestProtectFromDeletion:
+    def test_adds_label(self):
+        result = protect_from_deletion(_app())
+        assert result["metadata"]["labels"][PREVENT_DELETION_LABEL] == "true"
+
+    def test_keeps_other_labels(self):
+        app = _app()
+        app["metadata"]["labels"] = {"env": "prod"}
+        assert protect_from_deletion(app)["metadata"]["labels"] == {"env": "prod", PREVENT_DELETION_LABEL: "true"}
+
+    def test_overrides_app_cr_value(self):
+        app = _app()
+        app["metadata"]["labels"] = {PREVENT_DELETION_LABEL: "false"}
+        assert protect_from_deletion(app)["metadata"]["labels"] == {PREVENT_DELETION_LABEL: "true"}
+
+    def test_handles_null_labels(self):
+        app = _app()
+        app["metadata"]["labels"] = None
+        assert protect_from_deletion(app)["metadata"]["labels"] == {PREVENT_DELETION_LABEL: "true"}
+
+    def test_does_not_mutate_input(self):
+        app = _app()
+        app["metadata"]["labels"] = {"env": "prod"}
+        protect_from_deletion(app)
+        assert app["metadata"]["labels"] == {"env": "prod"}
+
+    def test_label_reaches_helm_release_and_oci_repository(self):
+        oci_repo, hr = convert(protect_from_deletion(_app()), _CATALOG)
+        assert oci_repo["metadata"]["labels"][PREVENT_DELETION_LABEL] == "true"
+        assert hr["metadata"]["labels"][PREVENT_DELETION_LABEL] == "true"
+
+
+class TestIsReleaseChartApp:
+    @pytest.mark.parametrize("provider", CLUSTER_CHART_PROVIDERS)
+    def test_release_chart(self, provider):
+        assert is_release_chart_app({"spec": {"name": release_chart_name(provider)}})
+
+    @pytest.mark.parametrize("name", ["cluster-aws", "release-openstack", "my-app", ""])
+    def test_other_chart(self, name):
+        assert not is_release_chart_app({"spec": {"name": name}})
+
+    def test_no_spec(self):
+        assert not is_release_chart_app({})

@@ -36,6 +36,11 @@ def release_chart_name(provider: str) -> str:
     return f"release-{provider}"
 
 
+def is_release_chart_app(app: dict) -> bool:
+    chart = (app.get("spec") or {}).get("name") or ""
+    return chart in {release_chart_name(p) for p in CLUSTER_CHART_PROVIDERS}
+
+
 def release_cr_name(provider: str, release_version: str) -> str:
     return f"{provider}-{release_version}"
 
@@ -67,6 +72,20 @@ def substitute_release_chart(app: dict, provider: str, release_version: str) -> 
     for key in _CHART_NAME_LABELS:
         if labels.get(key) == cluster_chart_name(provider):
             labels[key] = release_chart_name(provider)
+    return app
+
+
+# Stamped on the resources generated for a Cluster chart app: the platform's
+# Kyverno policy refuses DELETE on objects carrying it, and deleting the
+# HelmRelease of a Cluster chart uninstalls the cluster — see ADR 0034.
+PREVENT_DELETION_LABEL = "giantswarm.io/prevent-deletion"
+
+
+def protect_from_deletion(app: dict) -> dict:
+    app = deepcopy(app)
+    labels = dict(app["metadata"].get("labels") or {})
+    labels[PREVENT_DELETION_LABEL] = "true"
+    app["metadata"]["labels"] = labels
     return app
 
 

@@ -86,6 +86,10 @@ class TestBuildHelmRelease:
     def test_install_remediation_retries(self):
         assert build_helm_release(_app())["spec"]["install"]["remediation"]["retries"] == 10
 
+    def test_release_chart_install_remediation_has_no_retries(self):
+        remediation = build_helm_release(_app(spec_name="release-aws"))["spec"]["install"]["remediation"]
+        assert remediation == OrderedDict([("remediateLastFailure", False)])
+
     def test_install_remediation_not_remediate_last_failure(self):
         assert build_helm_release(_app())["spec"]["install"]["remediation"]["remediateLastFailure"] is False
 
